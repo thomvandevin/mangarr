@@ -37,6 +37,7 @@ class ProviderOut(BaseModel):
     needs_username: bool
     needs_password: bool
     needs_client_id: bool
+    login_url: str
 
 
 class SkipIn(BaseModel):
@@ -59,6 +60,7 @@ async def _out(session: AsyncSession, lst: ImportList) -> ImportListOut:
         username=config.get("username") or "",
         password=MASK if config.get("password") else "",
         client_id=config.get("client_id") or "",
+        access_token=MASK if config.get("access_token") else "",
         statuses=statuses_of(lst.kind, config),
         root_folder_id=lst.root_folder_id or 0,
         monitored=lst.monitored,
@@ -114,7 +116,7 @@ async def providers():
             kind=kind, label=info.label, statuses=info.statuses,
             default_statuses=list(info.default_statuses),
             needs_username=info.needs_username, needs_password=info.needs_password,
-            needs_client_id=info.needs_client_id,
+            needs_client_id=info.needs_client_id, login_url=info.login_url,
         )
         for kind, info in PROVIDERS.items()
     ]

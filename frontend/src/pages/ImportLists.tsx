@@ -52,6 +52,7 @@ function emptyConfig(provider: ImportListProvider, rootFolderId: number): Import
     username: "",
     password: "",
     client_id: "",
+    access_token: "",
     statuses: [...provider.default_statuses],
     root_folder_id: rootFolderId,
     monitored: true,
@@ -170,7 +171,7 @@ function ListEditor({
 
   const missing =
     !form.name.trim() ||
-    (provider.needs_username && !form.username.trim()) ||
+    (provider.needs_username && !form.username.trim() && !(provider.login_url && form.access_token)) ||
     (provider.needs_password && !form.password) ||
     (provider.needs_client_id && !form.client_id.trim()) ||
     form.statuses.length === 0;
@@ -239,6 +240,26 @@ function ListEditor({
             onChange={(e) => set("client_id", e.target.value)}
           />
         </div>
+      )}
+      {provider.login_url && (
+        <>
+          <div className="form-row">
+            <label htmlFor="list-token">Access token</label>
+            <input
+              id="list-token"
+              type="password"
+              autoComplete="off"
+              value={form.access_token}
+              onChange={(e) => set("access_token", e.target.value)}
+            />
+            <a className="btn" href={provider.login_url} target="_blank" rel="noreferrer">
+              Log in with {provider.label}
+            </a>
+          </div>
+          <p className="form-hint">
+            For a private profile: log in, then paste the token {provider.label} shows. The username can stay empty.
+          </p>
+        </>
       )}
       <div className="form-row">
         <label>Lists to follow</label>

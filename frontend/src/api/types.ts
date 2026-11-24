@@ -444,6 +444,7 @@ export interface ImportListProvider {
   needs_username: boolean;
   needs_password: boolean;
   needs_client_id: boolean;
+  login_url: string;
 }
 
 export interface ImportListConfig {
@@ -453,6 +454,7 @@ export interface ImportListConfig {
   username: string;
   password: string;
   client_id: string;
+  access_token: string;
   statuses: string[];
   root_folder_id: number;
   monitored: boolean;

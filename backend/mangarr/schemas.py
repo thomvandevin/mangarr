@@ -770,6 +770,7 @@ class ImportListIn(BaseModel):
     username: str = ""  # AniList / MyAnimeList / MangaUpdates account
     password: str = ""  # MangaUpdates only (its lists need a login)
     client_id: str = ""  # MyAnimeList API client id
+    access_token: str = ""
     statuses: list[str] = Field(default_factory=list)  # empty = the provider default
     root_folder_id: int
     monitored: bool = True

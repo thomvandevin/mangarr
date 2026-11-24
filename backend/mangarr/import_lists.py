@@ -19,6 +19,7 @@ from sqlalchemy.orm import selectinload
 from . import USER_AGENT
 from .adding import AddOptions, LibraryIndex, SeriesExists, create_series, start_refreshes
 from .db import session_scope
+from .metadata.anilist import login_url as anilist_login_url
 from .metadata.anilist import provider as anilist
 from .metadata.mangaupdates import API_URL as MU_API_URL
 from .metadata.mangaupdates import provider as mangaupdates
@@ -39,6 +40,7 @@ class ProviderInfo:
     needs_username: bool = True
     needs_password: bool = False
     needs_client_id: bool = False
+    login_url: str = ""
 
 
 PROVIDERS: dict[str, ProviderInfo] = {
@@ -49,6 +51,7 @@ PROVIDERS: dict[str, ProviderInfo] = {
             "PAUSED": "Paused", "DROPPED": "Dropped", "REPEATING": "Rereading",
         },
         default_statuses=("CURRENT", "PLANNING"),
+        login_url=anilist_login_url(),
     ),
     "myanimelist": ProviderInfo(
         label="MyAnimeList",
@@ -79,7 +82,7 @@ PROVIDERS: dict[str, ProviderInfo] = {
     ),
 }
 
-SECRET_FIELDS = ("password",)
+SECRET_FIELDS = ("password", "access_token")
 
 
 class ImportListError(RuntimeError):
@@ -128,8 +131,11 @@ def _http() -> httpx.AsyncClient:
 
 async def _fetch_anilist(config: dict, statuses: list[str]) -> list[ListEntry]:
     username = (config.get("username") or "").strip()
+    access_token = (config.get("access_token") or "").strip()
     try:
-        media = await anilist.user_manga_list(username, statuses)
+        if access_token and not username:
+            username = await anilist.viewer_name(access_token)
+        media = await anilist.user_manga_list(username, statuses, access_token)
     except RuntimeError as exc:
         raise ImportListError(str(exc)) from None
     entries = []
@@ -292,7 +298,8 @@ async def fetch_entries(kind: str, config: dict) -> list[ListEntry]:
     info = PROVIDERS.get(kind)
     if info is None:
         raise ImportListError(f"Unknown list type {kind!r}")
-    if info.needs_username and not (config.get("username") or "").strip():
+    logged_in = bool((config.get("access_token") or "").strip())
+    if info.needs_username and not logged_in and not (config.get("username") or "").strip():
         raise ImportListError(f"{info.label} lists need a username")
     if info.needs_password and not config.get("password"):
         raise ImportListError(f"{info.label} lists need the account password")

@@ -23,6 +23,7 @@ from mangarr.import_lists import (
     mangaupdates_id_from_link,
     sync_list,
 )
+from mangarr.metadata import anilist as anilist_metadata
 from mangarr.metadata.anilist import API_URL as ANILIST_URL
 from mangarr.metadata.base import SeriesMetadata
 from mangarr.metadata.mangaupdates import API_URL as MU_URL
@@ -254,6 +255,63 @@ async def test_anilist_list_skips_novels_and_explains_errors():
     assert [(e.key, e.title, e.anilist_id) for e in entries] == [("anilist:1", "One", 1)]
     with pytest.raises(ImportListError, match="Private User"):
         await fetch_entries("anilist", {"username": "hidden"})
+
+
+def _anilist_list(request: httpx.Request) -> httpx.Response:
+    body = json.loads(request.content)
+    if "Viewer" in body["query"]:
+        return httpx.Response(200, json={"data": {"Viewer": {"name": "me"}}})
+    assert body["variables"]["user"] == "me"
+    return httpx.Response(200, json={"data": {"MediaListCollection": {
+        "hasNextChunk": False,
+        "lists": [{"entries": [{"media": {"id": 1, "type": "MANGA", "format": "MANGA",
+                                          "title": {"english": "One"}}}]}],
+    }}})
+
+
+@respx.mock
+async def test_anilist_access_token_follows_its_own_account_without_a_username():
+    route = respx.post(ANILIST_URL).mock(side_effect=_anilist_list)
+    entries = await fetch_entries("anilist", {"access_token": " secret "})
+    assert [e.key for e in entries] == ["anilist:1"]
+    assert [c.request.headers["Authorization"] for c in route.calls] == ["Bearer secret"] * 2
+
+
+@respx.mock
+async def test_anilist_access_token_is_sent_with_a_username():
+    route = respx.post(ANILIST_URL).mock(side_effect=_anilist_list)
+    await fetch_entries("anilist", {"username": "me", "access_token": "secret"})
+    assert [c.request.headers["Authorization"] for c in route.calls] == ["Bearer secret"]
+
+
+@respx.mock
+async def test_anilist_public_list_sends_no_authorization():
+    route = respx.post(ANILIST_URL).mock(side_effect=_anilist_list)
+    await fetch_entries("anilist", {"username": "me"})
+    assert "Authorization" not in route.calls.last.request.headers
+
+
+def test_anilist_login_url_needs_a_client_id(monkeypatch):
+    monkeypatch.setattr(anilist_metadata.config, "anilist_client_id", "")
+    assert anilist_metadata.login_url() == ""
+    monkeypatch.setattr(anilist_metadata.config, "anilist_client_id", "42")
+    assert anilist_metadata.login_url() == (
+        "https://anilist.co/api/v2/oauth/authorize?client_id=42&response_type=token"
+    )
+
+
+async def test_saved_access_token_is_masked_and_survives_a_masked_update(maker):
+    async with maker() as session:
+        session.add(RootFolder(path="/manga"))
+        await session.commit()
+        body = ImportListIn(name="al", kind="anilist", access_token="secret", root_folder_id=1)
+        out = await create_import_list(body, session)
+        assert out.access_token == MASK
+        body.access_token = MASK
+        body.statuses = ["CURRENT"]
+        await update_import_list(out.id, body, session)
+        config = json.loads((await session.get(ImportList, out.id)).config)
+        assert config["access_token"] == "secret" and config["statuses"] == ["CURRENT"]
 
 
 @respx.mock
