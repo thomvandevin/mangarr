@@ -8,6 +8,7 @@ fail a download.
 
 import asyncio
 import logging
+from dataclasses import dataclass
 
 import httpx
 
@@ -15,6 +16,17 @@ log = logging.getLogger(__name__)
 
 APP_NAME = "mangarr"
 TIMEOUT = 10.0
+HELMARR_QUIET_SECONDS = 60.0
+
+
+@dataclass
+class _HelmarrBatch:
+    chapters: int
+    label: str
+    timer: asyncio.Task
+
+
+_helmarr_batches: dict[int, _HelmarrBatch] = {}
 
 
 async def send_webhook(url: str, secret: str, payload: dict) -> bool:
@@ -46,4 +58,37 @@ def notify_import(values: dict[str, str], series_id: int, detail: str = "") -> N
     }
     asyncio.get_running_loop().create_task(
         send_webhook(url, values.get("webhook_secret", ""), payload)
+    )
+
+
+def notify_helmarr(
+    values: dict[str, str], series_id: int, title: str, cover_url: str, label: str, chapters: int = 1
+) -> None:
+    """Schedule a Helmarr push for imported chapters. Imports of one series
+    are batched into a single push, sent once the series has been quiet for
+    HELMARR_QUIET_SECONDS, so a backlog doesn't push once per chapter."""
+    if values.get("helmarr_enabled") != "true":
+        return
+    url = values.get("helmarr_url", "").strip()
+    if not url:
+        return
+    batch = _helmarr_batches.get(series_id)
+    if batch is not None:
+        batch.timer.cancel()
+        chapters += batch.chapters
+    timer = asyncio.get_running_loop().create_task(
+        _send_helmarr_batch(url, series_id, title, cover_url)
+    )
+    _helmarr_batches[series_id] = _HelmarrBatch(chapters, label, timer)
+
+
+async def _send_helmarr_batch(url: str, series_id: int, title: str, cover_url: str) -> None:
+    await asyncio.sleep(HELMARR_QUIET_SECONDS)
+    batch = _helmarr_batches.pop(series_id)
+    summary = batch.label if batch.chapters == 1 else f"{batch.chapters} chapters"
+    # Helmarr picks the push layout from `source` and has none for Mangarr.
+    # Its Tautulli layout shows `title` as a free text line with the poster.
+    target = httpx.URL(url).copy_set_param("source", "tautulli")
+    await send_webhook(
+        str(target), "", {"action": "created", "title": f"{title} - {summary}", "poster_url": cover_url}
     )
