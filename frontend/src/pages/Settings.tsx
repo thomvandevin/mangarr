@@ -1085,6 +1085,22 @@ export default function Settings() {
             )}
           </div>
         </div>
+
+        <div className="settings-section">
+          <h3>Helmarr notifications</h3>
+          <p className="section-hint">
+            Push a notification to the Helmarr app when chapters are imported, one per series. Paste the
+            notify.helmarr.app URL that Helmarr set up as a webhook in one of your other apps.
+          </p>
+          <div className="form-row">
+            <label>Enabled</label>
+            <Toggle label="Enable Helmarr notifications" on={form.helmarr_enabled === "true"} onChange={setBool("helmarr_enabled")} />
+          </div>
+          <div className="form-row">
+            <label>Helmarr URL</label>
+            {text("helmarr_url")}
+          </div>
+        </div>
       </div>
       {browsing && (
         <FolderBrowser

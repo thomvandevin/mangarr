@@ -1554,6 +1554,9 @@ async def _run_direct_download(session: AsyncSession, dl: Download) -> None:
                     log.warning("could not remove staged download artifact %s: %s", artifact, exc)
 
     notifications.notify_import(values, series.id, f"Chapter {chapter.number:g}")
+    notifications.notify_helmarr(
+        values, series.id, series.title, series.cover_url, f"Chapter {chapter.number:g}"
+    )
     _notify_kavita(values, series)
 
 
@@ -2071,6 +2074,9 @@ async def _import_torrent(
         ))
         await session.commit()
     notifications.notify_import(values, series.id, f"{len(imported)} file(s) from torrent")
+    notifications.notify_helmarr(
+        values, series.id, series.title, series.cover_url, "1 chapter", len(imported)
+    )
     _notify_kavita(values, series)
 
 

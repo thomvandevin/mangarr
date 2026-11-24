@@ -106,6 +106,8 @@ DEFAULTS: dict[str, str] = {
     "webhook_enabled": "false",
     "webhook_url": "",
     "webhook_secret": "",
+    "helmarr_enabled": "false",
+    "helmarr_url": "",
     # Kavita: ask the reader to scan after imports so new chapters appear
     # without waiting for its own scheduled scan.
     "kavita_enabled": "false",
