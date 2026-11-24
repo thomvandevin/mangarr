@@ -1,6 +1,7 @@
 import httpx
 
 from .. import USER_AGENT
+from ..config import config
 from ..util import RateLimiter, rl_request
 from .base import MetadataProvider, SeriesMetadata
 
@@ -64,6 +65,10 @@ query ($user: String, $statuses: [MediaListStatus], $chunk: Int) {{
 }}
 """
 
+VIEWER_QUERY = """
+query { Viewer { name } }
+"""
+
 MAL_IDS_QUERY = """
 query ($ids: [Int], $page: Int) {
   Page(page: $page, perPage: 50) {
@@ -85,6 +90,15 @@ STATUS_MAP = {
 _limiter = RateLimiter(rate=1, per_seconds=1)
 
 
+def login_url() -> str:
+    if not config.anilist_client_id:
+        return ""
+    return (
+        "https://anilist.co/api/v2/oauth/authorize"
+        f"?client_id={config.anilist_client_id}&response_type=token"
+    )
+
+
 class AniListProvider(MetadataProvider):
     name = "anilist"
 
@@ -93,10 +107,11 @@ class AniListProvider(MetadataProvider):
             headers={"User-Agent": USER_AGENT}, timeout=30
         )
 
-    async def _query(self, query: str, variables: dict) -> dict:
+    async def _query(self, query: str, variables: dict, access_token: str = "") -> dict:
         resp = await rl_request(
             self._client, "POST", API_URL, limiter=_limiter,
             json={"query": query, "variables": variables},
+            headers={"Authorization": f"Bearer {access_token}"} if access_token else None,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -144,11 +159,11 @@ class AniListProvider(MetadataProvider):
         recs = ((media.get("recommendations") or {}).get("nodes")) or []
         return edges, recs
 
-    async def _query_explained(self, query: str, variables: dict) -> dict:
+    async def _query_explained(self, query: str, variables: dict, access_token: str = "") -> dict:
         """_query, but an error answer (AniList sends "Private User" and
         "User not found" as HTTP 404) raises with AniList's own message."""
         try:
-            return await self._query(query, variables)
+            return await self._query(query, variables, access_token)
         except httpx.HTTPStatusError as exc:
             try:
                 message = exc.response.json()["errors"][0]["message"]
@@ -156,14 +171,22 @@ class AniListProvider(MetadataProvider):
                 raise exc from None
             raise RuntimeError(f"AniList: {message}") from None
 
-    async def user_manga_list(self, username: str, statuses: list[str]) -> list[dict]:
-        """Media nodes on a public user's manga list with the given statuses
-        (CURRENT, PLANNING, COMPLETED, PAUSED, DROPPED, REPEATING)."""
+    async def viewer_name(self, access_token: str) -> str:
+        data = await self._query_explained(VIEWER_QUERY, {}, access_token)
+        return (data.get("Viewer") or {}).get("name") or ""
+
+    async def user_manga_list(
+        self, username: str, statuses: list[str], access_token: str = ""
+    ) -> list[dict]:
+        """Media nodes on a user's manga list with the given statuses
+        (CURRENT, PLANNING, COMPLETED, PAUSED, DROPPED, REPEATING).
+        A private profile needs an access token."""
         media: list[dict] = []
         chunk = 1
         while True:
             data = await self._query_explained(
-                USER_LIST_QUERY, {"user": username, "statuses": statuses, "chunk": chunk}
+                USER_LIST_QUERY, {"user": username, "statuses": statuses, "chunk": chunk},
+                access_token,
             )
             collection = data.get("MediaListCollection") or {}
             for group in collection.get("lists") or []:

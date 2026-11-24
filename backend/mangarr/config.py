@@ -27,6 +27,7 @@ class AppConfig(BaseSettings):
     # SQLite write-ahead log. Needs local storage for data_dir; set to false
     # if /config lives on NFS/SMB, where WAL's shared memory file is unreliable.
     sqlite_wal: bool = True
+    anilist_client_id: str = ""
 
     @model_validator(mode="after")
     def validate_security(self):
