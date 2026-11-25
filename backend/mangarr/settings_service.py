@@ -67,6 +67,11 @@ DEFAULTS: dict[str, str] = {
     # for installations that stored the final category directory here).
     # Empty = qBittorrent's default save path.
     "downloads_dir": "",
+    # Folder for EPUB copies of the library sized for an e-reader screen;
+    # empty turns the copies off. The default size is a Kobo Clara.
+    "ereader_dir": "",
+    "ereader_width": "1072",
+    "ereader_height": "1448",
     # Torrent import: "hardlink" keeps seeding without using double the
     # space (needs downloads + library on one filesystem); "copy" is the
     # safe cross-filesystem fallback.
@@ -183,6 +188,8 @@ def validate(values: dict[str, str]) -> None:
         ("torrent_auto_min_seeders", 0),
         ("finished_series_check_days", 1),
         ("import_list_sync_hours", 1),
+        ("ereader_width", 1),
+        ("ereader_height", 1),
     ):
         if key not in values:
             continue

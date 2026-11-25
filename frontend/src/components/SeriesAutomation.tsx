@@ -111,6 +111,7 @@ export function AutomationModal({
   const [upgrades, setUpgrades] = useState(series.upgrades_enabled);
   const [cutoff, setCutoff] = useState(series.upgrade_cutoff);
   const [mergeVolumes, setMergeVolumes] = useState(series.merge_volumes);
+  const [ereaderCopy, setEreaderCopy] = useState(series.ereader_copy);
   const [searchTitle, setSearchTitle] = useState(series.search_title || "");
   const [searchTemplates, setSearchTemplates] = useState(series.search_templates || "");
   const [showGroups, setShowGroups] = useState(false);
@@ -143,6 +144,7 @@ export function AutomationModal({
         upgrades_enabled: upgrades,
         upgrade_cutoff: cutoff,
         merge_volumes: mergeVolumes,
+        ereader_copy: ereaderCopy,
         search_title: searchTitle,
         search_templates: searchTemplates,
       }),
@@ -361,6 +363,14 @@ export function AutomationModal({
           downloaded, its chapter files are packed into one "Vol. NN" archive. Volumes containing
           files you added yourself are skipped.
         </p>
+      </div>
+
+      <div className="automation-section">
+        <h4>E-reader</h4>
+        <div className="form-row">
+          <label>Copy to e-reader folder</label>
+          <Toggle label="Copy to e-reader folder" on={ereaderCopy} onChange={setEreaderCopy} />
+        </div>
       </div>
 
       <ErrorNotice error={save.error} />

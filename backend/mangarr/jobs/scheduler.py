@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from ..db import session_scope
 from .. import settings_service
 from ..import_lists import sync_all_lists
+from ..library.ereader import sync_ereader_copies
 from .tasks import (
     monitor_all,
     process_direct_queue,
@@ -60,6 +61,10 @@ async def start() -> None:
     scheduler.add_job(
         remove_finished_torrents, "interval", minutes=10,
         id="torrent_cleanup", max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        sync_ereader_copies, "interval", minutes=10,
+        id="ereader_copies", max_instances=1, coalesce=True,
     )
     scheduler.add_job(
         monitor_all, "interval", minutes=interval,
