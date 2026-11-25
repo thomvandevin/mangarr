@@ -213,6 +213,17 @@ async def test_sync_imports_a_finished_usenet_download_and_clears_it_from_sabnzb
     assert await status() == (DownloadStatus.DONE, "")
     assert list((tmp_path / "library" / "Test Series").glob("*.cbz"))
     assert FakeSab.deleted == [NZO]
+    assert not payload.exists()
+
+
+async def test_sync_removes_a_single_file_usenet_payload_and_its_job_folder(usenet_download, tmp_path):
+    payload, status = usenet_download
+    FakeSab.record = QbtTorrent(hash=NZO, name="x", progress=1.0, state="uploading",
+                                content_path=str(payload / "Test Series - c001.cbz"), category="mangarr")
+    await tasks.sync_qbittorrent()
+    assert await status() == (DownloadStatus.DONE, "")
+    assert list((tmp_path / "library" / "Test Series").glob("*.cbz"))
+    assert not payload.exists() and payload.parent.exists()
 
 
 async def test_sync_fails_a_download_sabnzbd_gave_up(usenet_download):
