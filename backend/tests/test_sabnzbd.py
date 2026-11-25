@@ -17,7 +17,8 @@ from mangarr.torrent_selection import select_best_torrent
 
 BASE = "http://sabnzbd:8080"
 API = f"{BASE}/api"
-NZO = "SABnzbd_nzo_abc123"
+JOB = "138bc196-b2a2-4d3d-bff2-78b732118d1a"
+NZO = "nzb:" + JOB
 NZB = b'<?xml version="1.0"?><nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"></nzb>'
 SAB = {"sabnzbd_enabled": "true", "sabnzbd_url": BASE, "sabnzbd_api_key": "key", "sabnzbd_category": "mangarr"}
 
@@ -39,7 +40,7 @@ def sab(answers: dict[str, dict]):
 
 @respx.mock
 async def test_add_nzb_uploads_the_file_under_the_category_and_returns_the_job_id():
-    calls = sab({"addfile": {"status": True, "nzo_ids": [NZO]}})
+    calls = sab({"addfile": {"status": True, "nzo_ids": [JOB]}})
     assert await SabnzbdClient(BASE, "key").add_nzb(NZB, "Berserk v20", "mangarr") == NZO
     body = calls[0]["body"]
     assert NZB in body and b'filename="Berserk v20.nzb"' in body
@@ -49,15 +50,16 @@ async def test_add_nzb_uploads_the_file_under_the_category_and_returns_the_job_i
 
 @respx.mock
 async def test_get_torrent_reports_queue_progress():
-    sab({"queue": {"queue": {"slots": [{"nzo_id": NZO, "filename": "Berserk v20", "percentage": "40"}]}}})
+    calls = sab({"queue": {"queue": {"slots": [{"nzo_id": JOB, "filename": "Berserk v20", "percentage": "40"}]}}})
     record = await SabnzbdClient(BASE, "key").get_torrent(NZO)
-    assert (record.progress, record.is_complete, record.error) == (0.4, False, "")
+    assert (record.hash, record.progress, record.is_complete, record.error) == (NZO, 0.4, False, "")
+    assert calls[0]["nzo_ids"] == JOB
 
 
 @respx.mock
 async def test_get_torrent_completes_with_the_storage_path():
     sab({"history": {"history": {"slots": [
-        {"nzo_id": NZO, "name": "Berserk v20", "status": "Completed", "storage": "/data/downloads/complete/mangarr/Berserk v20"},
+        {"nzo_id": JOB, "name": "Berserk v20", "status": "Completed", "storage": "/data/downloads/complete/mangarr/Berserk v20"},
     ]}}})
     record = await SabnzbdClient(BASE, "key").get_torrent(NZO)
     assert record.is_complete and record.content_path == "/data/downloads/complete/mangarr/Berserk v20"
@@ -66,10 +68,10 @@ async def test_get_torrent_completes_with_the_storage_path():
 
 @respx.mock
 async def test_get_torrent_carries_the_failure_and_misses_unknown_jobs():
-    sab({"history": {"history": {"slots": [{"nzo_id": NZO, "status": "Failed", "fail_message": "Aborted, cannot be completed"}]}}})
+    sab({"history": {"history": {"slots": [{"nzo_id": JOB, "status": "Failed", "fail_message": "Aborted, cannot be completed"}]}}})
     record = await SabnzbdClient(BASE, "key").get_torrent(NZO)
     assert not record.is_complete and record.error == "Aborted, cannot be completed"
-    assert await SabnzbdClient(BASE, "key").get_torrent("SABnzbd_nzo_other") is None
+    assert await SabnzbdClient(BASE, "key").get_torrent("nzb:other") is None
 
 
 @respx.mock
@@ -77,7 +79,7 @@ async def test_delete_clears_queue_and_history():
     calls = sab({})
     await SabnzbdClient(BASE, "key").delete_torrents([NZO])
     assert [(c["mode"], c["name"], c["value"], c["del_files"]) for c in calls] == [
-        ("queue", "delete", NZO, "1"), ("history", "delete", NZO, "1"),
+        ("queue", "delete", JOB, "1"), ("history", "delete", JOB, "1"),
     ]
 
 
@@ -112,7 +114,7 @@ async def test_torznab_marks_nzb_enclosures_as_usenet_and_never_fetches_them():
 @respx.mock
 async def test_submit_routes_an_nzb_url_to_sabnzbd():
     respx.get("http://prowlarr:9696/20/download").mock(return_value=httpx.Response(200, content=NZB))
-    calls = sab({"addfile": {"status": True, "nzo_ids": [NZO]}})
+    calls = sab({"addfile": {"status": True, "nzo_ids": [JOB]}})
     url = "http://prowlarr:9696/20/download?apikey=k&file=Berserk+v20+%282007%29"
     assert await tasks.submit_torrent(url, SAB) == NZO
     assert calls[0] == {"mode": "set_config", "apikey": "key", "output": "json", "section": "categories",

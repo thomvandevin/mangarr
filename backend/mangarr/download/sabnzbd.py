@@ -6,7 +6,9 @@ import httpx
 from .. import USER_AGENT
 from .qbittorrent import QbtError, QbtTorrent
 
-NZO_PREFIX = "SABnzbd_nzo_"
+# Marks a download id as a SABnzbd job. SABnzbd's own ids have no fixed
+# shape (plain UUIDs since 4.x), so they can't be told from info hashes.
+NZB_ID_PREFIX = "nzb:"
 
 
 def is_nzb(content: bytes) -> bool:
@@ -59,14 +61,15 @@ class SabnzbdClient:
         ids = answer.get("nzo_ids") or []
         if not ids:
             raise QbtError("SABnzbd did not queue the NZB")
-        return ids[0]
+        return NZB_ID_PREFIX + ids[0]
 
-    async def get_torrent(self, nzo_id: str) -> QbtTorrent | None:
+    async def get_torrent(self, download_id: str) -> QbtTorrent | None:
+        nzo_id = download_id.removeprefix(NZB_ID_PREFIX)
         queue = (await self._call("queue", nzo_ids=nzo_id)).get("queue") or {}
         for slot in queue.get("slots") or []:
             if slot.get("nzo_id") == nzo_id:
                 return QbtTorrent(
-                    hash=nzo_id, name=slot.get("filename", ""), state="downloading",
+                    hash=download_id, name=slot.get("filename", ""), state="downloading",
                     progress=float(slot.get("percentage") or 0) / 100, content_path="", category=slot.get("cat", ""),
                 )
         history = (await self._call("history", nzo_ids=nzo_id)).get("history") or {}
@@ -75,7 +78,7 @@ class SabnzbdClient:
                 continue
             status = slot.get("status", "")
             record = QbtTorrent(
-                hash=nzo_id, name=slot.get("name", ""), state="downloading", progress=1.0,
+                hash=download_id, name=slot.get("name", ""), state="downloading", progress=1.0,
                 content_path="", category=slot.get("category", ""),
             )
             if status == "Completed":
@@ -86,11 +89,12 @@ class SabnzbdClient:
             return record
         return None
 
-    async def delete_torrents(self, nzo_ids: list[str], delete_files: bool = True) -> None:
-        if not nzo_ids:
+    async def delete_torrents(self, download_ids: list[str], delete_files: bool = True) -> None:
+        if not download_ids:
             return
+        nzo_ids = ",".join(i.removeprefix(NZB_ID_PREFIX) for i in download_ids)
         for mode in ("queue", "history"):
-            await self._call(mode, name="delete", value=",".join(nzo_ids), del_files=int(delete_files))
+            await self._call(mode, name="delete", value=nzo_ids, del_files=int(delete_files))
 
 
 async def test_connection(base_url: str, api_key: str) -> str:
