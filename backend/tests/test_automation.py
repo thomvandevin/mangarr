@@ -607,6 +607,23 @@ def test_mergeable_volumes_skip_volumes_with_gaps_in_the_volume_map():
     assert list(automation.mergeable_volumes(series, chapters)) == [1, 4]
 
 
+async def test_new_series_merge_volumes_follows_the_default_setting(db_session, monkeypatch):
+    from mangarr.adding import AddOptions, create_series
+    from mangarr.metadata.base import SeriesMetadata
+    from mangarr.metadata.mangaupdates import provider as mu_provider
+    from mangarr.models import Setting
+
+    async def metadata(mangaupdates_id):
+        return SeriesMetadata("mangaupdates", str(mangaupdates_id), f"Series {mangaupdates_id}")
+
+    monkeypatch.setattr(mu_provider, "get_series", metadata)
+    before = await create_series(db_session, AddOptions(root_folder_id=None), mangaupdates_id=1)
+    await db_session.merge(Setting(key="merge_volumes_default", value="true"))
+    await db_session.commit()
+    after = await create_series(db_session, AddOptions(root_folder_id=None), mangaupdates_id=2)
+    assert (before.merge_volumes, after.merge_volumes) == (False, True)
+
+
 async def test_merge_complete_volumes_packs_and_repoints(db_session, tmp_path):
     folder = tmp_path / "Test Series"
     files = [_cbz(folder / f"Test Series - Ch. {n:04d}.cbz", 1) for n in (1, 2, 3)]
