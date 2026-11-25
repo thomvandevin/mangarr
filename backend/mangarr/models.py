@@ -108,6 +108,8 @@ class Series(Base):
     upgrade_cutoff: Mapped[str] = mapped_column(String, default="")
     # pack each complete volume's chapter files into one volume archive
     merge_volumes: Mapped[bool] = mapped_column(Boolean, default=False)
+    # why closed, complete volumes were not merged, one "Volume N: reason" per line
+    merge_holds: Mapped[str] = mapped_column(Text, default="", server_default="")
     ereader_copy: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     # last scheduled monitor pass; finished, complete series are checked less
     last_monitored_at: Mapped[datetime | None] = mapped_column(

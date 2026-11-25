@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .models import Chapter, Series, SeriesStatus
 from .sources.base import SourceChapter
+from .util import normalize_title
 
 # all          every chapter
 # missing      chapters without a file when the mode is applied, plus new ones
@@ -296,6 +297,44 @@ def mergeable_volumes(
         ):
             out[volume] = sorted(members, key=lambda c: c.number)
     return out
+
+
+def merge_holds(
+    candidates: dict[int, list[Chapter]],
+    chapters: Iterable[Chapter],
+    volume_maps: Sequence[tuple[str, dict[float, int]]],
+    pages: dict[int, int],
+) -> dict[int, str]:
+    """Why a closed, complete volume should wait for a person instead of
+    being merged: a source placing one of its chapters in another volume
+    (a chapter whose volume was set by hand is trusted), a split-numbered
+    chapter repeating another chapter's title (usually a second release of
+    it), or far fewer pages than the series' typical volume (chapters missing
+    from the map). `pages` holds the page count of each known volume."""
+    titles: dict[str, list[float]] = {}
+    for c in chapters:
+        if not c.excluded and (key := normalize_title(c.title or "")):
+            titles.setdefault(key, []).append(c.number)
+    counts = sorted(pages.values())
+    typical = counts[len(counts) // 2] if len(counts) >= 3 else None
+    holds: dict[int, str] = {}
+    for volume, members in candidates.items():
+        reasons = []
+        for name, volume_map in volume_maps:
+            moved = [c.number for c in members
+                     if not c.volume_locked and volume_map.get(c.number) not in (None, volume)]
+            if moved:
+                reasons.append(f"{name} puts chapter {moved[0]:g} in volume {volume_map[moved[0]]}")
+        for c in members:
+            repeats = [n for n in titles.get(normalize_title(c.title or ""), []) if n != c.number]
+            if repeats and c.number != int(c.number):
+                reasons.append(f"chapter {c.number:g} repeats the title of chapter {repeats[0]:g}")
+                break
+        if typical and pages.get(volume, typical) < 0.6 * typical:
+            reasons.append(f"{pages[volume]} pages, where a volume of this series has about {typical}")
+        if reasons:
+            holds[volume] = "; ".join(reasons)
+    return holds
 
 
 # --------------------------------------------------------- finished series

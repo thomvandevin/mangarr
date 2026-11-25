@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import time
+import zipfile
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
@@ -29,6 +30,7 @@ from ..automation import (
     chapter_is_wanted,
     finished_and_complete,
     is_upgrade,
+    merge_holds,
     mergeable_volumes,
     needs_threshold_resolution,
     select_for_series,
@@ -67,7 +69,7 @@ from ..library.matcher import (
 from ..library.naming import chapter_path, series_folder, volume_filename
 from ..library.publish import publish_new_file
 from ..library.scanner import series_dir
-from ..library.volume_merge import merge_chapter_archives
+from ..library.volume_merge import archive_page_count, merge_chapter_archives
 from ..metadata.anilist import provider as anilist
 from ..metadata.mangaupdates import provider as mangaupdates
 from ..models import (
@@ -2518,6 +2520,26 @@ def _merge_input_versions(
     return versions
 
 
+def _volume_page_counts(candidates: dict[int, list[Chapter]], folders: list[Path]) -> dict[int, int]:
+    """Pages per volume: the candidates' chapter files summed, plus every
+    volume archive already in the series folders. An unreadable archive
+    leaves its volume out; the merge itself reports the damage."""
+    pages = {}
+    archives = [(volume, [Path(c.file_path) for c in members]) for volume, members in candidates.items()]
+    for folder in folders:
+        for path in folder.glob("*.cbz"):
+            if match := re.search(r" - Vol\. (\d+)$", path.stem):
+                archives.append((int(match.group(1)), [path]))
+    for volume, paths in archives:
+        if volume in pages:
+            continue
+        try:
+            pages[volume] = sum(archive_page_count(path) for path in paths)
+        except (OSError, zipfile.BadZipFile):
+            continue
+    return pages
+
+
 async def merge_complete_volumes(
     session: AsyncSession, series: Series, values: dict[str, str], force: bool = False,
 ) -> list[int]:
@@ -2543,13 +2565,33 @@ async def merge_complete_volumes(
     from ..metadata_issues import detect_series_issues, load_archive_ownership, manual_archive_lock
 
     merged: list[int] = []
-    if not mergeable_volumes(series, series.chapters, busy):
+    candidates = mergeable_volumes(series, series.chapters, busy)
+    holds: dict[int, str] = {}
+    if candidates:
+        await session.refresh(series, ["source_links"])
+        maps = []
+        if series.source_links or series.mangaupdates_id is not None:
+            try:
+                maps = await collect_volume_maps(series, values, skip_cooling_sources=True)
+            except Exception as exc:
+                log.warning("volume maps for %r unavailable, merging without them: %s", series.title, exc)
+        pages = await run_file_work(_volume_page_counts, candidates, folders)
+        holds = merge_holds(candidates, series.chapters, maps, pages)
+        for volume, reason in holds.items():
+            log.info("merge of %r volume %d held back: %s", series.title, volume, reason)
+    notes = "\n".join(f"Volume {volume}: {reason}" for volume, reason in sorted(holds.items()))
+    if series.merge_holds != notes:
+        series.merge_holds = notes
+        await session.commit()
+    if not candidates:
         return merged
     # Another series can map the same chapter archive. Packing can take a
     # long time, so it runs outside the global archive lock; ownership is
     # checked again under the lock before the merge is published.
     snapshot = await load_archive_ownership(session)
-    for volume, members in mergeable_volumes(series, series.chapters, busy).items():
+    for volume, members in candidates.items():
+        if volume in holds:
+            continue
         originals = _merge_input_versions(members, snapshot)
         if originals is None:
             log.info("merge of %r volume %d skipped: a chapter file is shared or unavailable",
