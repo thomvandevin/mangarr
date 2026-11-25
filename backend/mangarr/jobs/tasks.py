@@ -276,9 +276,12 @@ async def refresh_series_metadata(session: AsyncSession, series: Series) -> None
         series.cover_url = meta.cover_url
         series.banner_url = meta.banner_url or series.banner_url
         series.genres = ",".join(meta.genres)
+        series.authors = "\n".join(meta.authors)
         series.total_chapters = meta.total_chapters
         series.total_volumes = meta.total_volumes
     if mu_meta is not None:
+        if not series.authors:
+            series.authors = "\n".join(mu_meta.authors)
         # progress data: MangaUpdates wins whenever it knows more
         if mu_meta.status != "unknown":
             series.status = SeriesStatus(mu_meta.status)

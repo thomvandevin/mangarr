@@ -116,6 +116,7 @@ class MangaUpdatesProvider(MetadataProvider):
             year=year,
             cover_url=image.get("original") or image.get("thumb") or "",
             genres=[g["genre"] for g in (record.get("genres") or []) if g.get("genre")],
+            authors=list(dict.fromkeys(a["name"] for a in (record.get("authors") or []) if a.get("name"))),
             total_chapters=int(latest) if latest else None,
             total_volumes=parse_total_volumes(record.get("status")),
         )

@@ -19,6 +19,7 @@ bannerImage
 genres
 chapters
 volumes
+staff(perPage: 10, sort: [RELEVANCE, ID]) { edges { role node { name { full } } } }
 """
 
 SEARCH_QUERY = f"""
@@ -145,6 +146,12 @@ class AniListProvider(MetadataProvider):
             cover_url=cover.get("extraLarge") or cover.get("large") or "",
             banner_url=media.get("bannerImage") or "",
             genres=media.get("genres") or [],
+            # the story and art credits, not translators, letterers or assistants
+            authors=list(dict.fromkeys(
+                name for edge in ((media.get("staff") or {}).get("edges") or [])
+                if (edge.get("role") or "").startswith(("Story", "Art", "Original"))
+                and (name := ((edge.get("node") or {}).get("name") or {}).get("full"))
+            )),
             total_chapters=media.get("chapters"),
             total_volumes=media.get("volumes"),
         )

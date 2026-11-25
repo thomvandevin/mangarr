@@ -66,6 +66,7 @@ class Series(Base):
     sort_title: Mapped[str] = mapped_column(String, default="")
     alt_titles: Mapped[str] = mapped_column(Text, default="")  # newline-separated
     description: Mapped[str] = mapped_column(Text, default="")
+    authors: Mapped[str] = mapped_column(Text, default="", server_default="")  # newline-separated
     status: Mapped[SeriesStatus] = mapped_column(
         Enum(SeriesStatus, values_callable=lambda e: [m.value for m in e]),
         default=SeriesStatus.UNKNOWN,
