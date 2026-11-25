@@ -80,6 +80,33 @@ async def test_get_torrent_is_complete_only_when_seeding_side(percent, left, sta
     assert torrent.category == "mangarr"
 
 
+@pytest.mark.parametrize(("status", "is_finished", "seeding_done"), [
+    (0, True, True),
+    (0, False, False),
+    (6, False, False),
+])
+@respx.mock
+async def test_seeding_is_done_only_when_transmission_stopped_it_at_its_limits(status, is_finished, seeding_done):
+    _, answer = answering({"torrents": [{
+        "hashString": "abc", "name": "x", "percentDone": 1, "leftUntilDone": 0,
+        "status": status, "isFinished": is_finished, "downloadDir": "/d", "labels": ["mangarr"],
+    }]})
+    respx.post(RPC).mock(side_effect=answer)
+    torrent = await TransmissionClient(BASE, "", "").get_torrent("abc")
+    assert torrent.is_complete and torrent.seeding_done is seeding_done
+
+
+@respx.mock
+async def test_list_torrents_keeps_the_category_label_only():
+    _, answer = answering({"torrents": [
+        {"hashString": "abc", "name": "ours", "labels": ["mangarr"]},
+        {"hashString": "def", "name": "sonarr's", "labels": ["tv"]},
+        {"hashString": "123", "name": "unlabelled"},
+    ]})
+    respx.post(RPC).mock(side_effect=answer)
+    assert [t.name for t in await TransmissionClient(BASE, "", "").list_torrents("mangarr")] == ["ours"]
+
+
 @respx.mock
 async def test_get_torrent_unknown_hash_is_none():
     _, answer = answering({"torrents": []})

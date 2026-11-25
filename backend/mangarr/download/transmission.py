@@ -9,7 +9,9 @@ from .. import USER_AGENT
 from .qbittorrent import QbtError, QbtTorrent
 
 SESSION_HEADER = "X-Transmission-Session-Id"
-TORRENT_FIELDS = ["hashString", "name", "percentDone", "leftUntilDone", "status", "downloadDir", "labels"]
+TORRENT_FIELDS = [
+    "hashString", "name", "percentDone", "leftUntilDone", "status", "downloadDir", "labels", "isFinished",
+]
 # stopped, queued to seed, seeding
 SEEDING_SIDE_STATUSES = (0, 5, 6)
 
@@ -79,24 +81,33 @@ class TransmissionClient:
             return
         await self._call("torrent-remove", ids=hashes, **{"delete-local-data": delete_files})
 
-    async def get_torrent(self, torrent_hash: str) -> QbtTorrent | None:
-        torrents = (await self._call("torrent-get", ids=[torrent_hash], fields=TORRENT_FIELDS)).get("torrents") or []
-        if not torrents:
-            return None
-        t = torrents[0]
+    @staticmethod
+    def _record(t: dict) -> QbtTorrent:
         progress = float(t.get("percentDone", 0))
         complete = progress >= 1 and t.get("leftUntilDone") == 0 and t.get("status") in SEEDING_SIDE_STATUSES
+        # QbtTorrent reads qBittorrent's state names. isFinished is set when
+        # Transmission stops a torrent at its seed limits, not on a manual pause.
+        state = "downloading"
+        if complete:
+            state = "pausedUP" if t.get("status") == 0 and t.get("isFinished") else "uploading"
         download_dir = t.get("downloadDir", "")
         return QbtTorrent(
             hash=t.get("hashString", ""),
             name=t.get("name", ""),
             progress=progress,
-            # QbtTorrent.is_complete reads qBittorrent's state names
-            state="uploading" if complete else "downloading",
+            state=state,
             content_path=f"{download_dir.rstrip('/')}/{t.get('name', '')}" if download_dir else "",
             category=next(iter(t.get("labels") or []), ""),
             save_path=download_dir,
         )
+
+    async def get_torrent(self, torrent_hash: str) -> QbtTorrent | None:
+        torrents = (await self._call("torrent-get", ids=[torrent_hash], fields=TORRENT_FIELDS)).get("torrents") or []
+        return self._record(torrents[0]) if torrents else None
+
+    async def list_torrents(self, category: str) -> list[QbtTorrent]:
+        torrents = (await self._call("torrent-get", fields=TORRENT_FIELDS)).get("torrents") or []
+        return [self._record(t) for t in torrents if category in (t.get("labels") or [])]
 
     async def torrent_files(self, torrent_hash: str) -> list[str]:
         """The torrent's wanted files, relative to its download directory."""

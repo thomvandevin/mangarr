@@ -1044,6 +1044,18 @@ export default function Settings() {
             </select>
           </div>
           <div className="form-row">
+            <label>Remove after import</label>
+            <Toggle
+              label="Remove finished torrents from the client"
+              on={form.torrent_remove_completed === "true"}
+              onChange={setBool("torrent_remove_completed")}
+            />
+          </div>
+          <p className="section-hint">
+            Removes a torrent and its downloaded data from the client once it is imported and the client has
+            stopped seeding it at its own limits. A torrent whose import failed is removed right away.
+          </p>
+          <div className="form-row">
             <label>Auto-grab maximum size (GiB)</label>
             {text("torrent_auto_max_size_gib")}
           </div>

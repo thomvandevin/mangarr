@@ -1952,6 +1952,35 @@ async def sync_qbittorrent() -> None:
                 await client.close()
 
 
+async def remove_finished_torrents() -> None:
+    """Clear the torrent client of downloads Mangarr is done with: imported
+    ones the client has stopped seeding, and ones whose import failed."""
+    async with session_scope() as session:
+        values = await registry.apply_settings(session)
+        if not torrents_enabled(values) or values.get("torrent_remove_completed") != "true":
+            return
+        client = torrent_client(values, QbtClient)
+        try:
+            finished = []
+            for torrent in await client.list_torrents(values["qbittorrent_category"]):
+                statuses = set((await session.scalars(
+                    select(Download.status).where(
+                        Download.kind == DownloadKind.TORRENT, Download.torrent_hash == torrent.hash.lower(),
+                    )
+                )).all())
+                # a hash can belong to several downloads; one still in flight keeps it
+                if not statuses or statuses & set(SYNCED_TORRENT_STATUSES):
+                    continue
+                if statuses == {DownloadStatus.FAILED} or torrent.seeding_done:
+                    finished.append(torrent)
+            if finished:
+                await client.delete_torrents([torrent.hash for torrent in finished])
+                log.info("removed %d finished torrent(s) from the client: %s",
+                         len(finished), ", ".join(torrent.name for torrent in finished))
+        finally:
+            await client.close()
+
+
 def _library_volume_sizes(folder: Path) -> dict[int, int]:
     """Byte size of each volume archive in a series folder, by volume number."""
     sizes: dict[int, int] = {}
