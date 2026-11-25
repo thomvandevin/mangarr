@@ -90,6 +90,7 @@ _COLUMN_MIGRATIONS: list[tuple[str, str, str, str | None]] = [
     ("series", "ereader_copy", "BOOLEAN NOT NULL DEFAULT 1", None),
     ("series", "authors", "TEXT NOT NULL DEFAULT ''", None),
     ("series", "merge_holds", "TEXT NOT NULL DEFAULT ''", None),
+    ("series", "pending_progress", "TEXT NOT NULL DEFAULT ''", None),
 ]
 
 # Chapters mangarr downloaded before file provenance was tracked: the latest

@@ -2,6 +2,7 @@
 processing, qBittorrent sync, and the monitor loop."""
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -23,6 +24,7 @@ from sqlalchemy import and_, func, or_, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import kavita, notifications, settings_service
+from ..komga import from_settings as komga_from_settings, volume_progress
 from ..automation import (
     FINISHED_SERIES_MODES,
     MERGED_FILE_SOURCE,
@@ -2589,9 +2591,19 @@ async def merge_complete_volumes(
     # long time, so it runs outside the global archive lock; ownership is
     # checked again under the lock before the merge is published.
     snapshot = await load_archive_ownership(session)
+    # read before packing, while Komga certainly still lists the chapter copies
+    komga = komga_from_settings(values) if series.ereader_copy else None
+    komga_books: dict[str, dict] = {}
+    if komga and set(candidates) - set(holds):
+        try:
+            komga_books = await komga[0].series_books(komga[1], folders[0].name)
+        except Exception as exc:
+            log.warning("Komga progress for %r unavailable: %s", series.title, exc)
+    progress: dict[str, int | str] = {}
     for volume, members in candidates.items():
         if volume in holds:
             continue
+        chapter_names = [Path(c.file_path).stem for c in members]
         originals = _merge_input_versions(members, snapshot)
         if originals is None:
             log.info("merge of %r volume %d skipped: a chapter file is shared or unavailable",
@@ -2671,6 +2683,10 @@ async def merge_complete_volumes(
         finally:
             staged.unlink(missing_ok=True)
         merged.append(volume)
+        if (read := volume_progress([komga_books.get(name) for name in chapter_names])) is not None:
+            progress[str(volume)] = read
+    if progress:
+        series.pending_progress = json.dumps({**json.loads(series.pending_progress or "{}"), **progress})
     if merged:
         log.info("Merged volume(s) %s of %r", merged, series.title)
         # The chapter archives are gone; drop their warnings now rather than
