@@ -1,3 +1,5 @@
+import pytest
+
 from mangarr.models import Chapter, Series
 from mangarr.sources.base import TorrentIndexer, TorrentRelease
 from mangarr.torrent_selection import (
@@ -102,6 +104,36 @@ def test_short_series_title_matches_as_a_whole_token():
     series = Series(title="GTO", sort_title="gto")
     assert release_matches_series("[Group] GTO v01-v25", series)
     assert not release_matches_series("[Group] GTOther v01", series)
+
+
+@pytest.mark.parametrize(("release", "matches"), [
+    ("Psyren v01-16 (2011-2014) (Digital) (danke-Empire)", True),
+    ("[Group] (2011) Psyren - c145", True),
+    ("Psyren (Digital) (danke-Empire)", True),
+    ("Psyren", True),
+    ("Saiko no Sainou / Psyren 001-145", True),
+    ("Psyren.v05.2012.Digital.danke-Empire", True),
+    ("The Weakest Tamer Began a Journey to Pick Up Trash v01-13 [Audiobook] [Seven Seas Siren] [Stick & Oak]", False),
+    ("Psyren Another Call v01", False),
+    ("Dark.Horse-Psyrens.Unbound.Vol.01", False),
+])
+def test_release_title_has_to_stand_where_a_title_stands(release, matches):
+    series = Series(title="PSYЯEN", sort_title="psyren", alt_titles="Siren\nPsyren")
+    assert release_matches_series(release, series) is matches
+
+
+async def test_a_release_already_imported_for_the_series_is_not_selected_again():
+    release = TorrentRelease(source_name="fake", title="Series c001-c003", magnet="magnet:again", size_bytes=100, seeders=5)
+    indexer = FakeIndexer([release], {release.magnet: b""})
+
+    async def select(blocked_titles):
+        return await select_best_torrent(
+            Series(title="Series", sort_title="series"), chapters(), [indexer],
+            max_size_bytes=1000, min_seeders=1, blocked_titles=blocked_titles,
+        )
+
+    assert (await select(set())).release is release
+    assert await select({"Series c001-c003"}) is None
 
 
 class FakeIndexer(TorrentIndexer):
