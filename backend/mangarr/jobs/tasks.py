@@ -139,6 +139,9 @@ UPGRADES_PER_PASS = 25
 # a failed grab blocks that (chapter, source) pair, but not forever — sources
 # fix broken chapters, so retry after a while (one request per window is cheap)
 FAILED_GRAB_RETRY_AFTER = timedelta(days=7)
+# history event of a chapter that an imported volume archive was inspected
+# for and did not hold; the automatic torrent search stops looking for it
+NOT_IN_RELEASE = "not_in_release"
 
 # ...unless the failure was transient (the source was down, timing out or
 # rate-limiting us, or the download stalled): the chapter itself is probably
@@ -1222,13 +1225,19 @@ async def auto_grab_best_torrent(
             Download.status == DownloadStatus.DONE,
         )
     )).all())
+    absent_from_volumes = set((await session.scalars(
+        select(HistoryEvent.chapter_id).where(
+            HistoryEvent.series_id == series.id, HistoryEvent.event == NOT_IN_RELEASE,
+        )
+    )).all())
     try:
         max_gib = int(values.get("torrent_auto_max_size_gib", "30"))
         min_seeders = int(values.get("torrent_auto_min_seeders", "1"))
         selection = await select_best_torrent(
             series,
             [chapter for chapter in series.chapters
-             if not chapter.excluded and (chapter.monitored or not only_monitored)],
+             if not chapter.excluded and (chapter.monitored or not only_monitored)
+             and chapter.id not in absent_from_volumes],
             registry.enabled_torrent_indexers(values),
             max_size_bytes=max_gib * 1024**3,
             min_seeders=max(1, min_seeders) if only_monitored else min_seeders,
@@ -2136,6 +2145,20 @@ async def _import_torrent(
                         # Assign file_source after file_path resets provenance.
                         ch.file_path = str(dest)
                         ch.file_source = dl.source_name or "nyaa"
+        # A volume's file name promises every chapter of the volume, but its
+        # inspected contents can lack some (extras numbered x.5). Another
+        # volume pack would promise them again, so the miss is recorded.
+        for dest, chapter, volume in imported:
+            if chapter is not None or volume is None:
+                continue
+            held = set(coverage.get(str(dest), []))
+            for ch in candidates.values():
+                if ch.volume == volume and ch.id not in held and not ch.downloaded:
+                    session.add(HistoryEvent(
+                        series_id=series.id, chapter_id=ch.id, event=NOT_IN_RELEASE,
+                        source_name=dl.source_name or "nyaa",
+                        detail=f"Chapter {ch.number:g} is not in {dest.name}",
+                    ))
         dl.status = DownloadStatus.DONE
         dl.progress = 1.0
         dl.error = ""
