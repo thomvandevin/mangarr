@@ -13,5 +13,7 @@ def test_authors_are_the_story_and_art_credits():
     assert anilist.authors == ["Kentarou Miura", "Kouji Mori"]
 
     record = {"series_id": 2, "authors": [{"name": "MIURA Kentarou", "type": "Author"},
-                                          {"name": "MIURA Kentarou", "type": "Artist"}]}
-    assert MangaUpdatesProvider.__new__(MangaUpdatesProvider)._to_metadata(record).authors == ["MIURA Kentarou"]
+                                          {"name": "MIURA Kentarou", "type": "Artist"},
+                                          {"name": "Studio Gaga", "type": "Artist"}]}
+    authors = MangaUpdatesProvider.__new__(MangaUpdatesProvider)._to_metadata(record).authors
+    assert authors == ["Kentarou Miura", "Studio Gaga"]
