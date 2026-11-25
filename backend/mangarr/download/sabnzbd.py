@@ -24,7 +24,7 @@ class SabnzbdClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def _call(self, mode: str, files: dict | None = None, **params) -> dict:
+    async def _call(self, mode: str, files: dict | None = None, check: bool = True, **params) -> dict:
         params = {"mode": mode, "apikey": self.api_key, "output": "json", **params}
         try:
             if files:
@@ -40,7 +40,7 @@ class SabnzbdClient:
             answer = resp.json()
         except ValueError:
             raise QbtError("SABnzbd sent an unreadable answer") from None
-        if answer.get("status") is False:
+        if check and answer.get("status") is False:
             raise QbtError(f"SABnzbd rejected {mode}: {answer.get('error', 'unknown error')}")
         return answer
 
@@ -93,8 +93,10 @@ class SabnzbdClient:
         if not download_ids:
             return
         nzo_ids = ",".join(i.removeprefix(NZB_ID_PREFIX) for i in download_ids)
+        # a job is in the queue or in the history, and SABnzbd answers
+        # status false for the place it is not in
         for mode in ("queue", "history"):
-            await self._call(mode, name="delete", value=nzo_ids, del_files=int(delete_files))
+            await self._call(mode, check=False, name="delete", value=nzo_ids, del_files=int(delete_files))
 
 
 async def test_connection(base_url: str, api_key: str) -> str:
