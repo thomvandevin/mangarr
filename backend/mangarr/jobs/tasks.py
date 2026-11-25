@@ -1911,8 +1911,11 @@ async def sync_qbittorrent() -> None:
                         await _import_torrent(session, dl, Path(torrent.content_path),
                                               values, files=files)
                         # nothing seeds a usenet download, so its copy in the
-                        # downloads folder goes once the library has the files
+                        # downloads folder goes once the library has the files.
+                        # SABnzbd keeps a completed job's files when the job is
+                        # deleted, so they are removed here.
                         if usenet and dl.status == DownloadStatus.DONE:
+                            await run_file_work(_remove_usenet_payload, Path(torrent.content_path))
                             await client.delete_torrents([dl.torrent_hash])
                     finally:
                         if lock is not None:
@@ -1922,6 +1925,16 @@ async def sync_qbittorrent() -> None:
         finally:
             for client in clients.values():
                 await client.close()
+
+
+def _remove_usenet_payload(content_path: Path) -> None:
+    if content_path.is_dir():
+        shutil.rmtree(content_path, ignore_errors=True)
+        return
+    content_path.unlink(missing_ok=True)
+    # a single-file job reports the file inside its own job folder
+    with suppress(OSError):
+        content_path.parent.rmdir()
 
 
 def _place_torrent_files(content_path, series, chapters, *args, **kwargs):
