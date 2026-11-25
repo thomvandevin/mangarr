@@ -266,7 +266,9 @@ def mergeable_volumes(
     A volume qualifies when it is closed (a later volume has started, or the
     series has finished) and every chapter in it has its own .cbz that
     mangarr downloaded — disk-adopted files belong to the user and are never
-    consolidated. Chapters still downloading hold their volume back."""
+    consolidated. Chapters still downloading hold their volume back, and so
+    does a chapter numbered inside the volume's range that the volume map
+    places elsewhere or nowhere: the archive would miss pages mid-volume."""
     active = [c for c in chapters if not c.excluded]
     by_volume: dict[int, list[Chapter]] = {}
     for c in active:
@@ -281,6 +283,10 @@ def mergeable_volumes(
     for volume, members in sorted(by_volume.items()):
         if volume == latest and not finished:
             continue  # the newest volume may still be growing
+        low = min(c.number for c in members)
+        high = max(c.number for c in members)
+        if any(low < c.number < high and c.volume != volume for c in active):
+            continue
         if all(
             c.downloaded and c.file_path and c.id not in busy_chapter_ids
             and c.file_path not in shared
