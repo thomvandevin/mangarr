@@ -593,6 +593,20 @@ def test_mergeable_volumes_need_closed_complete_mangarr_volumes():
     assert list(automation.mergeable_volumes(series, chapters)) == [1, 4]
 
 
+def test_mergeable_volumes_skip_volumes_with_gaps_in_the_volume_map():
+    def ch(n, volume):
+        return Chapter(id=int(n * 10), number=float(n), volume=volume, excluded=False,
+                       downloaded=True, file_path=f"/lib/{n}.cbz", file_source="alpha")
+
+    series = Series(status=SeriesStatus.FINISHED)
+    chapters = [
+        ch(1, 1), ch(2, 1),               # contiguous → merge
+        ch(3, 2), ch(4, None), ch(5, 2),  # 4 has no volume → skip
+        ch(6, 3), ch(7, 4), ch(8, 3),     # 7 is mapped elsewhere → skip
+    ]
+    assert list(automation.mergeable_volumes(series, chapters)) == [1, 4]
+
+
 async def test_merge_complete_volumes_packs_and_repoints(db_session, tmp_path):
     folder = tmp_path / "Test Series"
     files = [_cbz(folder / f"Test Series - Ch. {n:04d}.cbz", 1) for n in (1, 2, 3)]
