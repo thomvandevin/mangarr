@@ -4,7 +4,7 @@ import zipfile
 
 from PIL import Image
 
-from mangarr.library.ereader import mirror, screen_pages
+from mangarr.library.ereader import decode, mirror, screen_pages
 
 
 def _cbz(path, pages, comicinfo="<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>"):
@@ -69,3 +69,9 @@ def test_mirror_refuses_a_target_inside_the_library(tmp_path):
     kept.write_bytes(b"x")
     mirror([(root, root / "A")], root, 1072, 1448, 75)
     assert kept.exists() and not (root / "A" / "A - Ch. 0001.epub").exists()
+
+
+def test_truncated_page_is_still_decoded():
+    data = io.BytesIO()
+    Image.effect_noise((600, 900), 64).save(data, "JPEG")
+    assert decode(data.getvalue()[:-200]).size == (600, 900)

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageFile
 from sqlalchemy import select
 
 from .. import settings_service
@@ -39,6 +39,21 @@ PAGE = (
     "<style>body{{margin:0}}img{{display:block}}</style></head>"
     '<body><img src="p{n:04d}.jpg" width="{w}" height="{h}" alt=""/></body></html>'
 )
+
+
+def decode(data: bytes) -> Image.Image:
+    image = Image.open(io.BytesIO(data))
+    try:
+        image.load()
+    except OSError:
+        # a page cut off a few bytes early still shows everything above the cut
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        try:
+            image = Image.open(io.BytesIO(data))
+            image.load()
+        finally:
+            ImageFile.LOAD_TRUNCATED_IMAGES = False
+    return image
 
 
 def screen_pages(image: Image.Image, width: int, height: int, rtl: bool) -> list[Image.Image]:
@@ -80,7 +95,7 @@ def write_epub(src: Path, dest: Path, width: int, height: int, quality: int) -> 
             epub.writestr("nav.xhtml", NAV.format(title=title))
             count = 0
             for entry, _ in sorted(archive_pages(files), key=lambda f: f[1].as_posix()):
-                with Image.open(io.BytesIO(cbz.read(entry))) as image:
+                with decode(cbz.read(entry)) as image:
                     for page in screen_pages(image, width, height, rtl):
                         count += 1
                         data = io.BytesIO()
