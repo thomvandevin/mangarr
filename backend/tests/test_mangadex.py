@@ -73,8 +73,9 @@ async def test_volume_covers_prefer_english_art(source):
     def cover(volume, locale, name):
         return {"attributes": {"volume": volume, "locale": locale, "fileName": name}}
 
-    respx.get(f"{API_URL}/cover").respond(json={"total": 4, "data": [
-        cover("1", "ja", "ja1.jpg"), cover("1", "en", "en1.jpg"), cover("2", "ja", "ja2.jpg"), cover(None, "ja", "x.jpg"),
+    respx.get(f"{API_URL}/cover").respond(json={"total": 5, "data": [
+        cover("1", "ja", "ja1.jpg"), cover("1", "en", "en1.jpg"), cover("2.1", "ja", "reprint2.jpg"),
+        cover("2", "ja", "ja2.jpg"), cover(None, "ja", "x.jpg"),
     ]})
     assert await source.volume_covers("abc") == {
         1: f"{UPLOADS_URL}/covers/abc/en1.jpg", 2: f"{UPLOADS_URL}/covers/abc/ja2.jpg",

@@ -299,19 +299,22 @@ class MangaDexSource(DirectSource):
 
     async def volume_covers(self, external_id: str) -> dict[int, str]:
         """Cover image URL per volume: the English edition's art when there
-        is one, else the Japanese, else any."""
+        is one, else the Japanese, else any. MangaDex files other editions'
+        covers (special collections, reprints) as "6.1", "6.2"; the plain "6"
+        is the original volume's."""
         rank = {"en": 0, "ja": 1}
-        best: dict[int, tuple[int, str]] = {}
+        best: dict[int, tuple[tuple[int, bool], str]] = {}
         offset = 0
         while True:
             data = await self._get("/cover", {"manga[]": external_id, "limit": 100, "offset": offset})
             for item in data.get("data") or []:
                 attrs = item.get("attributes") or {}
                 try:
-                    volume = int(float(attrs.get("volume") or ""))
+                    label = float(attrs.get("volume") or "")
                 except ValueError:
                     continue
-                score = rank.get(attrs.get("locale"), len(rank))
+                volume = int(label)
+                score = (rank.get(attrs.get("locale"), len(rank)), label != volume)
                 if attrs.get("fileName") and (volume not in best or score < best[volume][0]):
                     best[volume] = (score, f"{UPLOADS_URL}/covers/{external_id}/{attrs['fileName']}")
             offset += 100
