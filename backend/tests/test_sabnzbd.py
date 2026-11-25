@@ -76,7 +76,7 @@ async def test_get_torrent_carries_the_failure_and_misses_unknown_jobs():
 
 @respx.mock
 async def test_delete_clears_queue_and_history():
-    calls = sab({})
+    calls = sab({"queue": {"status": False, "nzo_ids": []}})
     await SabnzbdClient(BASE, "key").delete_torrents([NZO])
     assert [(c["mode"], c["name"], c["value"], c["del_files"]) for c in calls] == [
         ("queue", "delete", JOB, "1"), ("history", "delete", JOB, "1"),
