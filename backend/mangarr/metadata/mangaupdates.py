@@ -80,6 +80,15 @@ def parse_number_token(token: str | None) -> list[float]:
     return [float(n) for n in range(int(lo), int(hi) + 1)]
 
 
+def display_name(name: str) -> str:
+    """MangaUpdates writes Japanese names family name first, in capitals:
+    "MIURA Kentarou" reads as "Kentarou Miura"."""
+    parts = name.split()
+    if len(parts) == 2 and parts[0].isupper() and not parts[1].isupper():
+        return f"{parts[1]} {parts[0].title()}"
+    return name
+
+
 class MangaUpdatesProvider(MetadataProvider):
     name = "mangaupdates"
 
@@ -116,7 +125,9 @@ class MangaUpdatesProvider(MetadataProvider):
             year=year,
             cover_url=image.get("original") or image.get("thumb") or "",
             genres=[g["genre"] for g in (record.get("genres") or []) if g.get("genre")],
-            authors=list(dict.fromkeys(a["name"] for a in (record.get("authors") or []) if a.get("name"))),
+            authors=list(dict.fromkeys(
+                display_name(a["name"]) for a in (record.get("authors") or []) if a.get("name")
+            )),
             total_chapters=int(latest) if latest else None,
             total_volumes=parse_total_volumes(record.get("status")),
         )
