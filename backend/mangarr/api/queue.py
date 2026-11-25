@@ -6,6 +6,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..download.client import torrent_client
 from ..download.qbittorrent import QbtClient
 from ..jobs.tasks import (
     REMOVED_BY_USER,
@@ -104,10 +105,7 @@ async def _remove_downloads(session: AsyncSession, ids: list[int]) -> int:
         values = await registry.apply_settings(session)
         if values["qbittorrent_enabled"] != "true":
             raise HTTPException(409, "Enable qBittorrent to stop these torrents before removing them")
-        client = QbtClient(
-            values["qbittorrent_url"], values["qbittorrent_username"],
-            values["qbittorrent_password"],
-        )
+        client = torrent_client(values, QbtClient)
         try:
             await client.delete_torrents(hashes)
         except Exception as exc:
@@ -190,7 +188,7 @@ async def retry_failed_download(
             if dl.torrent_hash:
                 # Import failures leave completed data seeding. Track that
                 # torrent again without re-fetching an expired signed URL.
-                client = QbtClient(values["qbittorrent_url"], values["qbittorrent_username"], values["qbittorrent_password"])
+                client = torrent_client(values, QbtClient)
                 try:
                     existing = await client.get_torrent(dl.torrent_hash)
                 finally:

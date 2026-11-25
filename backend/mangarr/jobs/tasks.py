@@ -44,6 +44,7 @@ from ..chapter_metadata import (
 from ..db import session_scope
 from ..download.direct import DuplicateChapterPagesError, download_chapter_to_cbz
 from ..download.images import ImageOptimization
+from ..download.client import torrent_client
 from ..download.qbittorrent import QbtClient
 from ..download.torrent import magnet_btih_hex
 from ..filename import parse_filename
@@ -1072,9 +1073,7 @@ async def submit_torrent(magnet: str, values: dict[str, str]) -> str:
         torrent_hash = magnet_btih_hex(magnet)
     if not torrent_hash:
         raise ValueError("magnet link must include a valid btih info hash")
-    client = QbtClient(
-        values["qbittorrent_url"], values["qbittorrent_username"], values["qbittorrent_password"]
-    )
+    client = torrent_client(values, QbtClient)
     try:
         category = values["qbittorrent_category"]
         # put grabs in a category subfolder so they stay organized and separate
@@ -1816,10 +1815,7 @@ async def sync_qbittorrent() -> None:
         downloads = result.scalars().all()
         if not downloads:
             return
-        client = QbtClient(
-            values["qbittorrent_url"], values["qbittorrent_username"],
-            values["qbittorrent_password"],
-        )
+        client = torrent_client(values, QbtClient)
         try:
             for dl in downloads:
                 if not dl.torrent_hash:
