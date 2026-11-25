@@ -95,6 +95,27 @@ def test_copies_carry_series_metadata_and_follow_its_changes(tmp_path):
         assert "<dc:description>A witch story &amp; more</dc:description>" in epub.read("content.opf").decode()
 
 
+def test_a_cover_opens_the_copy_and_a_new_cover_rebuilds_it(tmp_path):
+    root, target = tmp_path / "manga", tmp_path / "kobo"
+    folder = root / "A"
+    src = folder / "A - Vol. 01.cbz"
+    _cbz(src, [((900, 1300), "red")], comicinfo="<ComicInfo/>")
+    mirror([(root, folder)], target, 1072, 1448, 75)
+    copy = target / "A" / "A - Vol. 01.epub"
+    with zipfile.ZipFile(copy) as epub:
+        assert "p0002.jpg" not in epub.namelist()
+
+    cover = tmp_path / "001.jpg"
+    Image.new("RGB", (700, 1000), "blue").save(cover, "JPEG")
+    later = copy.stat().st_mtime_ns + 10**9
+    os.utime(cover, ns=(later, later))
+    mirror([(root, folder)], target, 1072, 1448, 75, covers={src: cover})
+    with zipfile.ZipFile(copy) as epub:
+        assert Image.open(io.BytesIO(epub.read("p0001.jpg"))).getpixel((10, 10))[2] > 200
+        assert "p0002.jpg" in epub.namelist()
+        assert 'href="p0001.jpg" media-type="image/jpeg" properties="cover-image"' in epub.read("content.opf").decode()
+
+
 def test_truncated_page_is_still_decoded():
     data = io.BytesIO()
     Image.effect_noise((600, 900), 64).save(data, "JPEG")
