@@ -26,6 +26,7 @@ from mangarr.models import (
     Download,
     DownloadKind,
     DownloadStatus,
+    HistoryEvent,
     RootFolder,
     Series,
     SeriesSourceLink,
@@ -349,6 +350,25 @@ async def test_auto_torrent_grab_returns_inspected_coverage(db_session, tmp_path
     assert captured["max_size"] == 30 * 1024**3
     assert captured["min_seeders"] == 1
     assert captured["enqueued"] == (series.id, release.magnet, release.title)
+
+
+async def test_auto_torrent_stops_looking_for_chapters_a_volume_did_not_hold(db_session, tmp_path, monkeypatch):
+    series = await _make_series(db_session, [1, 2.5])
+    series.root_folder = RootFolder(path=str(tmp_path))
+    extra = next(ch for ch in series.chapters if ch.number == 2.5)
+    db_session.add(HistoryEvent(series_id=series.id, chapter_id=extra.id, event=tasks.NOT_IN_RELEASE))
+    await db_session.commit()
+    searched = []
+
+    async def fake_select(series, chapters, *args, **kwargs):
+        searched.extend(ch.number for ch in chapters)
+
+    monkeypatch.setattr(tasks, "select_best_torrent", fake_select)
+    monkeypatch.setattr(tasks.registry, "enabled_torrent_indexers", lambda values: [object()])
+
+    await auto_grab_best_torrent(db_session, series, {"qbittorrent_enabled": "true"})
+
+    assert searched == [1.0]
 
 
 async def test_auto_torrent_skips_when_series_download_is_active(

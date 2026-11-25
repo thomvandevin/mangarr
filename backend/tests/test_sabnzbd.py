@@ -4,13 +4,14 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 import respx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from mangarr import settings_service
 from mangarr.download.qbittorrent import QbtError, QbtTorrent
 from mangarr.download.sabnzbd import SabnzbdClient
 from mangarr.jobs import tasks
-from mangarr.models import Base, Chapter, Download, DownloadKind, DownloadStatus, RootFolder, Series
+from mangarr.models import Base, Chapter, Download, DownloadKind, DownloadStatus, HistoryEvent, RootFolder, Series
 from mangarr.sources.base import TorrentIndexer, TorrentRelease
 from mangarr.sources.torznab import TorznabIndexer
 from mangarr.torrent_selection import select_best_torrent
@@ -233,3 +234,50 @@ async def test_sync_fails_a_download_sabnzbd_gave_up(usenet_download):
     await tasks.sync_qbittorrent()
     assert await status() == (DownloadStatus.FAILED, "Aborted, cannot be completed")
     assert FakeSab.deleted == []
+
+
+async def test_import_records_a_chapter_its_inspected_volume_does_not_hold(tmp_path, monkeypatch):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    payload = tmp_path / "downloads" / "Test Series v01"
+    payload.mkdir(parents=True)
+    with zipfile.ZipFile(payload / "Test Series v01.cbz", "w") as zf:
+        for page in ("Test Series c001 p001.png", "Test Series c002 p001.png"):
+            zf.writestr(page, b"\x89PNG\r\n\x1a\n" + page.encode())
+    (tmp_path / "library").mkdir()
+    async with maker() as session:
+        await settings_service.set_many(session, SAB)
+        series = Series(title="Test Series", sort_title="test series",
+                        root_folder=RootFolder(path=str(tmp_path / "library")), folder_name="Test Series")
+        series.chapters = [Chapter(number=n, volume=1, downloaded=False) for n in (1.0, 2.0, 2.5)]
+        session.add(series)
+        await session.commit()
+        session.add(Download(series_id=series.id, kind=DownloadKind.TORRENT, status=DownloadStatus.DOWNLOADING,
+                             title="Test Series v01", source_name="nyaa", payload="http://nzb", torrent_hash=NZO))
+        await session.commit()
+
+    @asynccontextmanager
+    async def scope():
+        async with maker() as session:
+            yield session
+
+    FakeSab.deleted = []
+    FakeSab.record = QbtTorrent(hash=NZO, name="x", progress=1.0, state="uploading", content_path=str(payload), category="mangarr")
+    monkeypatch.setattr(tasks, "session_scope", scope)
+    monkeypatch.setattr(tasks, "download_client", lambda *args: FakeSab())
+    monkeypatch.setattr(tasks.notifications, "notify_import", lambda *a: None)
+    monkeypatch.setattr(tasks.notifications, "notify_helmarr", lambda *a: None)
+    monkeypatch.setattr(tasks, "_notify_kavita", lambda *a: None)
+
+    await tasks.sync_qbittorrent()
+
+    async with maker() as session:
+        chapters = {c.number: c for c in (await session.execute(select(Chapter))).scalars()}
+        events = (await session.execute(select(HistoryEvent).where(HistoryEvent.event == tasks.NOT_IN_RELEASE))).scalars().all()
+    assert [chapters[n].downloaded for n in (1.0, 2.0, 2.5)] == [True, True, False]
+    assert [(e.chapter_id, e.detail) for e in events] == [(chapters[2.5].id, "Chapter 2.5 is not in Test Series - Vol. 01.cbz")]
+    tasks._torrent_missing_counts.clear()
+    tasks._import_path_missing_counts.clear()
+    await engine.dispose()
