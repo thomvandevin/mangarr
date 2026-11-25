@@ -136,6 +136,7 @@ export interface SeriesDetail extends Series {
   upgrades_enabled: boolean;
   upgrade_cutoff: string;
   merge_volumes: boolean;
+  merge_holds: string;
   ereader_copy: boolean;
   // enabled download sources: global order, and the order grabs use here
   global_source_order: string[];

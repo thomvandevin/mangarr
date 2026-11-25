@@ -607,6 +607,25 @@ def test_mergeable_volumes_skip_volumes_with_gaps_in_the_volume_map():
     assert list(automation.mergeable_volumes(series, chapters)) == [1, 4]
 
 
+def test_merge_holds_name_why_a_complete_volume_waits():
+    def ch(n, volume, title="", locked=False):
+        return Chapter(number=float(n), volume=volume, title=title, volume_locked=locked, excluded=False)
+
+    v1 = [ch(1, 1, "Black Swordsman"), ch(2, 1, "The Brand")]
+    v2 = [ch(3, 2, "Duel"), ch(4, 2, "Intrusion", locked=True)]
+    v3 = [ch(5, 3, "The Witch"), ch(5.1, 3, "Duel!")]
+    v4 = [ch(6, 4, "The Witch")]
+    candidates = {1: v1, 2: v2, 3: v3, 4: v4}
+    maps = [("mangadex", {1: 1, 2: 1, 4: 3}), ("mangaupdates", {3: 5})]
+    pages = {1: 200, 2: 210, 3: 190, 4: 90, 5: 205}
+    holds = automation.merge_holds(candidates, v1 + v2 + v3 + v4, maps, pages)
+    assert holds == {
+        2: "mangaupdates puts chapter 3 in volume 5",
+        3: "chapter 5.1 repeats the title of chapter 3",
+        4: "90 pages, where a volume of this series has about 200",
+    }
+
+
 async def test_new_series_merge_volumes_follows_the_default_setting(db_session, monkeypatch):
     from mangarr.adding import AddOptions, create_series
     from mangarr.metadata.base import SeriesMetadata

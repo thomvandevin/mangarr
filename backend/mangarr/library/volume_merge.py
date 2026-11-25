@@ -28,6 +28,11 @@ MAX_MERGE_PAGE_BYTES = MAX_MEMBER_BYTES
 MAX_MERGE_BYTES = MAX_EXPANDED_BYTES
 
 
+def archive_page_count(path: Path) -> int:
+    with zipfile.ZipFile(path) as archive:
+        return sum(1 for _ in archive_pages(archive_files(archive.infolist())))
+
+
 def merge_chapter_archives(
     chapter_files: list[tuple[float, Path]],
     dest: Path,

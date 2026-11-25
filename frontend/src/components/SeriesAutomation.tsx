@@ -358,10 +358,20 @@ export function AutomationModal({
           </p>
         )}
         <ErrorNotice error={mergeNow.error} />
+        {series.merge_holds && (
+          <div className="form-hint" role="status">
+            <strong>Waiting for a check:</strong>
+            {series.merge_holds.split("\n").map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </div>
+        )}
         <p className="form-hint">
           Once a later volume starts (or the series finishes) and every chapter of a volume is
           downloaded, its chapter files are packed into one "Vol. NN" archive. Volumes containing
-          files you added yourself are skipped.
+          files you added yourself are skipped, and so is a volume a source places differently, with
+          a second release of a chapter, or with far fewer pages than usual: fix its chapters' volumes
+          or exclude the duplicate and it merges on the next pass.
         </p>
       </div>
 

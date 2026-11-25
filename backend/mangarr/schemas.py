@@ -113,6 +113,7 @@ class SeriesDetailOut(SeriesOut):
     upgrades_enabled: bool = False
     upgrade_cutoff: str = ""
     merge_volumes: bool = False
+    merge_holds: str = ""
     ereader_copy: bool = True
     # enabled download sources in global priority order, and in the order
     # grabs try them for this series (override applied, blocked removed)
