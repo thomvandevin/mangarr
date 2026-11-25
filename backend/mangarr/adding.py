@@ -178,6 +178,7 @@ async def create_series(
         monitor_mode=opts.monitor_mode,
         monitor_from=opts.monitor_from if opts.monitor_mode == "from_chapter" else None,
         root_folder_id=opts.root_folder_id,
+        merge_volumes=values.get("merge_volumes_default") == "true",
         folder_name=sanitize_filename(chosen_title),
         folder_pinned=opts.folder_pinned,
     )

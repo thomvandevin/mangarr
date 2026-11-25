@@ -73,6 +73,8 @@ DEFAULTS: dict[str, str] = {
     "ereader_width": "1072",
     "ereader_height": "1448",
     "ereader_quality": "75",
+    # Whether newly added series pack finished volumes into one archive each.
+    "merge_volumes_default": "false",
     # Torrent import: "hardlink" keeps seeding without using double the
     # space (needs downloads + library on one filesystem); "copy" is the
     # safe cross-filesystem fallback.
@@ -161,6 +163,8 @@ def validate(values: dict[str, str]) -> None:
         raise ValueError("torrent_monitor_enabled must be true or false")
     if values.get("torrent_remove_completed", "false") not in {"true", "false"}:
         raise ValueError("torrent_remove_completed must be true or false")
+    if values.get("merge_volumes_default", "false") not in {"true", "false"}:
+        raise ValueError("merge_volumes_default must be true or false")
     ImageOptimization.from_settings(values)
 
     for key in ("naming_template", "naming_template_no_volume"):

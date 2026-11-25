@@ -948,6 +948,18 @@ export default function Settings() {
             <label>JPEG quality (1-95)</label>
             {text("ereader_quality")}
           </div>
+          <div className="form-row">
+            <label>New series</label>
+            <Toggle
+              label="Merge finished volumes"
+              on={form.merge_volumes_default === "true"}
+              onChange={setBool("merge_volumes_default")}
+            />
+          </div>
+          <p className="section-hint">
+            New series pack each finished volume into one archive, so the e-reader gets volumes instead of
+            chapters. Each series can still change this on its own page.
+          </p>
         </div>
 
         <div className="settings-section">
