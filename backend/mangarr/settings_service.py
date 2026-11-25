@@ -50,6 +50,9 @@ DEFAULTS: dict[str, str] = {
     "qbittorrent_password": "",
     "qbittorrent_category": "mangarr",
     "qbittorrent_enabled": "false",
+    # Remove a torrent and its data from the client once it is imported and
+    # the client has stopped seeding it, and at once when its import failed.
+    "torrent_remove_completed": "false",
     # SABnzbd takes the NZBs of usenet indexers configured as Torznab feeds
     "sabnzbd_enabled": "false",
     "sabnzbd_url": "http://localhost:8080",
@@ -150,6 +153,8 @@ def validate(values: dict[str, str]) -> None:
         validate_templates(values["torrent_query_templates"], required=True)
     if values.get("torrent_monitor_enabled", "false") not in {"true", "false"}:
         raise ValueError("torrent_monitor_enabled must be true or false")
+    if values.get("torrent_remove_completed", "false") not in {"true", "false"}:
+        raise ValueError("torrent_remove_completed must be true or false")
     ImageOptimization.from_settings(values)
 
     for key in ("naming_template", "naming_template_no_volume"):

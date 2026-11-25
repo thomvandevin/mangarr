@@ -40,6 +40,11 @@ class QbtTorrent:
             "checkingUP",
         )
 
+    @property
+    def seeding_done(self) -> bool:
+        """Complete and stopped by the client, as it does at its seeding limits."""
+        return self.state in ("pausedUP", "stoppedUP")
+
 
 class QbtClient:
     def __init__(self, base_url: str, username: str, password: str) -> None:
