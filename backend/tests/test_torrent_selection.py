@@ -10,6 +10,7 @@ from mangarr.torrent_selection import (
     select_best_torrent,
     torrent_coverage,
     torrent_paths,
+    torrent_volume_sizes,
 )
 
 
@@ -237,3 +238,30 @@ async def test_volume_pack_without_volume_map_does_not_claim_exact_coverage():
     # Without a chapter-to-volume map there is no safe exact exclusion set.
     # Guessing here would suppress direct grabs for chapters the pack may omit.
     assert selected is None
+
+
+def _volume_pack():
+    release = TorrentRelease(source_name="fake", title="Series v01-v02", magnet="magnet:pack", size_bytes=100, seeders=5)
+    return release, torrent_with("Series v01.cbz", "Series v02.cbz")
+
+
+async def _select(release, metadata, library_volumes):
+    volumes = [Chapter(number=1, volume=1), Chapter(number=2, volume=2)]
+    return await select_best_torrent(
+        Series(title="Series", sort_title="series"), volumes, [FakeIndexer([release], {release.magnet: metadata})],
+        max_size_bytes=1000, min_seeders=1, library_volumes=library_volumes,
+    )
+
+
+async def test_pack_with_a_volume_the_library_holds_as_other_bytes_is_skipped():
+    release, metadata = _volume_pack()
+    assert torrent_volume_sizes(metadata) == {1: 123, 2: 123}
+    assert (await _select(release, metadata, {})).release is release
+    assert (await _select(release, metadata, {1: 123})).release is release
+    assert await _select(release, metadata, {1: 999}) is None
+
+
+async def test_release_without_a_file_list_is_skipped_when_it_shares_a_volume_with_the_library():
+    release, _ = _volume_pack()
+    assert (await _select(release, b"", {3: 5})).release is release
+    assert await _select(release, b"", {2: 5}) is None
