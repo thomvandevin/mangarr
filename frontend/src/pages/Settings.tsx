@@ -926,6 +926,27 @@ export default function Settings() {
         <ImageOptimizationSettings form={form} setForm={setForm} />
 
         <div className="settings-section">
+          <h3>E-reader copies</h3>
+          <p className="section-hint">
+            Keeps an EPUB copy of every CBZ in this folder, with pages resized to the screen below. Point a Komga
+            library at it to sync to a Kobo. Copies of deleted chapters are removed. Leave the folder empty to turn
+            this off.
+          </p>
+          <div className="form-row">
+            <label>Folder</label>
+            {text("ereader_dir")}
+          </div>
+          <div className="form-row">
+            <label>Screen width (px)</label>
+            {text("ereader_width")}
+          </div>
+          <div className="form-row">
+            <label>Screen height (px)</label>
+            {text("ereader_height")}
+          </div>
+        </div>
+
+        <div className="settings-section">
           <h3>Sources</h3>
           <p className="section-hint">
             Chapters are grabbed from the highest-priority enabled source that has them — use the

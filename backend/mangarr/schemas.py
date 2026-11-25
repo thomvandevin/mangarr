@@ -113,6 +113,7 @@ class SeriesDetailOut(SeriesOut):
     upgrades_enabled: bool = False
     upgrade_cutoff: str = ""
     merge_volumes: bool = False
+    ereader_copy: bool = True
     # enabled download sources in global priority order, and in the order
     # grabs try them for this series (override applied, blocked removed)
     global_source_order: list[str] = []
@@ -193,6 +194,7 @@ class SeriesUpdateIn(BaseModel):
     upgrades_enabled: bool | None = None
     upgrade_cutoff: str | None = None
     merge_volumes: bool | None = None
+    ereader_copy: bool | None = None
 
 
 class SeriesEditorIn(BaseModel):
