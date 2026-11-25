@@ -11,6 +11,7 @@ from .base import DirectSource, SourceChapter, SourceSeries
 log = logging.getLogger(__name__)
 
 API_URL = "https://api.mangadex.org"
+UPLOADS_URL = "https://uploads.mangadex.org"
 AUTH_URL = "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token"
 
 # Global API limit is ~5 req/s; the at-home (image server) endpoint is 40 req/min.
@@ -295,6 +296,32 @@ class MangaDexSource(DirectSource):
                 break
         # stable: copies of one chapter keep their feed order
         return sorted(chapters, key=lambda c: c.number)
+
+    async def volume_covers(self, external_id: str) -> dict[int, str]:
+        """Cover image URL per volume: the English edition's art when there
+        is one, else the Japanese, else any."""
+        rank = {"en": 0, "ja": 1}
+        best: dict[int, tuple[int, str]] = {}
+        offset = 0
+        while True:
+            data = await self._get("/cover", {"manga[]": external_id, "limit": 100, "offset": offset})
+            for item in data.get("data") or []:
+                attrs = item.get("attributes") or {}
+                try:
+                    volume = int(float(attrs.get("volume") or ""))
+                except ValueError:
+                    continue
+                score = rank.get(attrs.get("locale"), len(rank))
+                if attrs.get("fileName") and (volume not in best or score < best[volume][0]):
+                    best[volume] = (score, f"{UPLOADS_URL}/covers/{external_id}/{attrs['fileName']}")
+            offset += 100
+            if offset >= (data.get("total") or 0):
+                return {volume: url for volume, (_, url) in best.items()}
+
+    async def fetch_image(self, url: str) -> bytes:
+        resp = await self._client.get(url)
+        resp.raise_for_status()
+        return resp.content
 
     async def get_volume_map(self, external_id: str) -> dict[float, int]:
         """Volume assignments from the aggregate endpoint, across all

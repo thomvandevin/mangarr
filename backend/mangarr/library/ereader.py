@@ -6,10 +6,12 @@ import asyncio
 import io
 import logging
 import re
+import time
 import uuid
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from html import escape, unescape
 from pathlib import Path
 
@@ -17,8 +19,11 @@ from PIL import Image, ImageFile
 from sqlalchemy import select
 
 from .. import settings_service
+from ..automation import MERGED_FILE_SOURCE
+from ..config import config
 from ..db import session_scope
-from ..models import RootFolder, Series
+from ..models import Chapter, RootFolder, Series, SeriesSourceLink
+from ..sources.mangadex import source as mangadex
 from .archive_members import archive_files, archive_pages
 from .scanner import root_unavailable, series_dir
 
@@ -141,7 +146,8 @@ def screen_pages(image: Image.Image, width: int, height: int, rtl: bool) -> list
 
 
 def write_epub(
-    src: Path, dest: Path, width: int, height: int, quality: int, info: BookInfo = BookInfo()
+    src: Path, dest: Path, width: int, height: int, quality: int, info: BookInfo = BookInfo(),
+    cover: Path | None = None,
 ) -> None:
     title = escape(src.stem)
     tmp = dest.with_suffix(".epub.partial")
@@ -157,8 +163,10 @@ def write_epub(
             epub.writestr("META-INF/container.xml", CONTAINER)
             epub.writestr("nav.xhtml", NAV.format(title=title))
             count = 0
-            for entry, _ in sorted(archive_pages(files), key=lambda f: f[1].as_posix()):
-                with decode(cbz.read(entry)) as image:
+            reads = [cover.read_bytes] if cover else []
+            reads += [partial(cbz.read, entry) for entry, _ in sorted(archive_pages(files), key=lambda f: f[1].as_posix())]
+            for read in reads:
+                with decode(read()) as image:
                     for page in screen_pages(image, width, height, rtl):
                         count += 1
                         data = io.BytesIO()
@@ -191,12 +199,13 @@ def write_epub(
 
 def mirror(
     folders: list[tuple[Path, Path]], target: Path, width: int, height: int, quality: int,
-    info: dict[Path, BookInfo] | None = None,
+    info: dict[Path, BookInfo] | None = None, covers: dict[Path, Path] | None = None,
 ) -> None:
     """Make `target` hold exactly one EPUB per CBZ in the (root, series
     folder) pairs, laid out as under the root, carrying the metadata `info`
-    holds for each series folder."""
-    info = info or {}
+    holds for each series folder and opening with the cover image `covers`
+    holds for an archive."""
+    info, covers = info or {}, covers or {}
     wanted: dict[Path, tuple[Path, BookInfo]] = {}
     # copies inside the library would be picked up as library files, and
     # the cleanup below would delete EPUBs the user keeps there
@@ -218,19 +227,46 @@ def mirror(
             if not any(folder.iterdir()):
                 folder.rmdir()
     for dest, (src, book) in sorted(wanted.items()):
+        cover = covers.get(src)
         try:
-            if not dest.exists() or dest.stat().st_mtime < src.stat().st_mtime:
-                write_epub(src, dest, width, height, quality, book)
+            if not dest.exists() or dest.stat().st_mtime < max(
+                src.stat().st_mtime, cover.stat().st_mtime if cover else 0
+            ):
+                write_epub(src, dest, width, height, quality, book, cover)
             else:
                 refresh_metadata(src, dest, book)
         except Exception as exc:
             log.warning("e-reader copy of %s failed: %s", src, exc)
 
 
+COVER_CHECK_SECONDS = 24 * 3600
+
+
+async def volume_covers(series_id: int, mangadex_id: str, volumes: set[int]) -> dict[int, Path]:
+    """Cached MangaDex cover per volume. Missing covers are looked up at
+    most once a day per series, so a volume without art costs no requests."""
+    folder = config.data_dir / "covers" / str(series_id)
+    paths = {volume: folder / f"{volume:03d}.jpg" for volume in volumes}
+    checked = folder / ".checked"
+    missing = {volume for volume, path in paths.items() if not path.exists()}
+    if missing and (not checked.exists() or time.time() - checked.stat().st_mtime > COVER_CHECK_SECONDS):
+        folder.mkdir(parents=True, exist_ok=True)
+        checked.touch()
+        try:
+            urls = await mangadex.volume_covers(mangadex_id)
+            for volume in sorted(missing & urls.keys()):
+                tmp = paths[volume].with_suffix(".partial")
+                tmp.write_bytes(await mangadex.fetch_image(urls[volume]))
+                tmp.rename(paths[volume])
+        except Exception as exc:
+            log.warning("volume covers for series %d failed: %s", series_id, exc)
+    return {volume: path for volume, path in paths.items() if path.exists()}
+
+
 async def sync_ereader_copies() -> None:
     async with session_scope() as session:
         values = await settings_service.get_all(session)
-        folders, info = [], {}
+        folders, info, merged = [], {}, []
         for series, root in await session.execute(
             select(Series, RootFolder.path)
             .join(RootFolder, RootFolder.id == Series.root_folder_id)
@@ -243,9 +279,26 @@ async def sync_ereader_copies() -> None:
                 authors=tuple(name for name in series.authors.splitlines() if name.strip()),
                 description=plain_text(series.description),
             )
-    if values["ereader_dir"]:
-        await asyncio.to_thread(
-            mirror, folders, Path(values["ereader_dir"]),
-            int(values["ereader_width"]), int(values["ereader_height"]), int(values["ereader_quality"]),
-            info,
-        )
+            # downloaded volume releases bring their own cover; merged ones get MangaDex art
+            files = {Path(p) for p in (await session.execute(
+                select(Chapter.file_path).distinct()
+                .where(Chapter.series_id == series.id, Chapter.file_source == MERGED_FILE_SOURCE)
+            )).scalars()}
+            link = (await session.execute(
+                select(SeriesSourceLink.external_id)
+                .where(SeriesSourceLink.series_id == series.id, SeriesSourceLink.source_name == mangadex.name)
+            )).scalar_one_or_none()
+            if link and files:
+                merged.append((series.id, link, files))
+    if not values["ereader_dir"]:
+        return
+    covers = {}
+    for series_id, link, files in merged:
+        by_volume = {int(m.group(1)): f for f in files if (m := re.search(r" - Vol\. (\d+)$", f.stem))}
+        for volume, cover in (await volume_covers(series_id, link, set(by_volume))).items():
+            covers[by_volume[volume]] = cover
+    await asyncio.to_thread(
+        mirror, folders, Path(values["ereader_dir"]),
+        int(values["ereader_width"]), int(values["ereader_height"]), int(values["ereader_quality"]),
+        info, covers,
+    )

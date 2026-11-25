@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from mangarr.sources.mangadex import API_URL, MangaDexSource
+from mangarr.sources.mangadex import API_URL, UPLOADS_URL, MangaDexSource
 
 AGGREGATE = {
     "result": "ok",
@@ -66,3 +66,16 @@ def test_configure_resets_tokens_when_credentials_change(source):
 
     assert source._access_token is None
     assert source._token_expires_at == 0.0
+
+
+@respx.mock
+async def test_volume_covers_prefer_english_art(source):
+    def cover(volume, locale, name):
+        return {"attributes": {"volume": volume, "locale": locale, "fileName": name}}
+
+    respx.get(f"{API_URL}/cover").respond(json={"total": 4, "data": [
+        cover("1", "ja", "ja1.jpg"), cover("1", "en", "en1.jpg"), cover("2", "ja", "ja2.jpg"), cover(None, "ja", "x.jpg"),
+    ]})
+    assert await source.volume_covers("abc") == {
+        1: f"{UPLOADS_URL}/covers/abc/en1.jpg", 2: f"{UPLOADS_URL}/covers/abc/ja2.jpg",
+    }
