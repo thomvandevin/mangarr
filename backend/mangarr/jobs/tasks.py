@@ -1212,6 +1212,16 @@ async def auto_grab_best_torrent(
             failed_grab_blocks(datetime.now(timezone.utc), include_series=True),
         )
     )).all()
+    # A release that was imported and still left chapters missing cannot supply
+    # them on another grab. Its link can differ between searches, so it is
+    # recognised by title.
+    imported_titles = set((await session.scalars(
+        select(Download.title).where(
+            Download.series_id == series.id,
+            Download.kind == DownloadKind.TORRENT,
+            Download.status == DownloadStatus.DONE,
+        )
+    )).all())
     try:
         max_gib = int(values.get("torrent_auto_max_size_gib", "30"))
         min_seeders = int(values.get("torrent_auto_min_seeders", "1"))
@@ -1225,6 +1235,7 @@ async def auto_grab_best_torrent(
             values=values,
             blocked_payloads={(source, payload) for source, payload, _ in failures},
             blocked_hashes={info_hash.lower() for _, _, info_hash in failures if info_hash},
+            blocked_titles=imported_titles,
         )
     except Exception as exc:
         log.warning("automatic torrent search failed for %r: %s", series.title, safe_error_reason(exc))

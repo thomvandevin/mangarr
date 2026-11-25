@@ -166,23 +166,45 @@ def torrent_coverage(
     return covered or coverage_from_text(release_title, chapters)
 
 
+_LEADING_TAG = re.compile(r"^\s*(\[[^\]]*\]|\([^)]*\))")
+_TAG_OPEN = "\x00"
+# what may follow the title: a tag, a number, or a volume or chapter marker
+_AFTER_TITLE = re.compile(rf"{_TAG_OPEN}|\d|(v|c|ch) ?\d|(vol|volume|volumes|chapter|chapters)\b")
+
+
+def _title_segments(release_title: str) -> list[str]:
+    """The places a release name can start a title: its beginning, past any
+    leading group tags, and after a "/" or "|" between two titles. Each is
+    normalized like normalize_title, except that an opening bracket survives
+    as _TAG_OPEN."""
+    segments = []
+    for part in re.split(r"\s[/|]\s", release_title):
+        while match := _LEADING_TAG.match(part):
+            part = part[match.end():]
+        part = re.sub(r"[(\[{]", f" {_TAG_OPEN} ", part.lower().replace("×", "x"))
+        part = re.sub(rf"[^a-z0-9{_TAG_OPEN}]+", " ", part).strip()
+        if part:
+            segments.append(part)
+    return segments
+
+
 def release_matches_series(release_title: str, series: Series) -> bool:
-    release = normalize_title(release_title)
-    if not release:
-        return False
+    """Whether a release is named after the series. The title has to stand
+    where a title stands and be followed by a number or a tag, so a title
+    inside another word, in a group name ("Siren" in "[Seven Seas Siren]")
+    or of a spin-off ("Series Kitchen v04") does not match."""
+    segments = _title_segments(release_title)
     aliases = metadata_title_queries(series)
     if getattr(series, "search_title", ""):
         aliases.insert(0, series.search_title)
-    normalized = [normalize_title(alias) for alias in aliases]
-    for alias in normalized:
-        compact_length = len(alias.replace(" ", ""))
-        if compact_length < 3:
+    for alias in map(normalize_title, aliases):
+        if len(alias.replace(" ", "")) < 3:
             continue
-        if compact_length == 3:
-            if re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", release):
+        for segment in segments:
+            if segment == alias:
                 return True
-        elif alias in release:
-            return True
+            if segment.startswith(alias + " ") and _AFTER_TITLE.match(segment[len(alias) + 1:]):
+                return True
     return False
 
 
@@ -202,6 +224,7 @@ async def select_best_torrent(
     values: dict[str, str] | None = None,
     blocked_payloads: set[tuple[str, str]] | None = None,
     blocked_hashes: set[str] | None = None,
+    blocked_titles: set[str] | None = None,
 ) -> TorrentSelection | None:
     # This selector is used by the explicit add-time "Search now" flow, which
     # intentionally searches even when the new series itself is unmonitored.
@@ -230,6 +253,7 @@ async def select_best_torrent(
                     or key in seen
                     or (release.source_name, key) in (blocked_payloads or set())
                     or (key.startswith("magnet:") and magnet_btih_hex(key) in blocked_hashes)
+                    or release.title in (blocked_titles or set())
                     or (release.usenet and not usenet_enabled(values or {}))
                     or (not release.usenet and release.seeders < min_seeders)
                     or release.size_bytes <= 0
