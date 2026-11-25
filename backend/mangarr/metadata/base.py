@@ -15,6 +15,7 @@ class SeriesMetadata:
     cover_url: str = ""
     banner_url: str = ""
     genres: list[str] = field(default_factory=list)
+    authors: list[str] = field(default_factory=list)
     total_chapters: int | None = None
     total_volumes: int | None = None
 

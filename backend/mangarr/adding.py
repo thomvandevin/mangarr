@@ -172,6 +172,7 @@ async def create_series(
         cover_url=meta.cover_url,
         banner_url=meta.banner_url,
         genres=",".join(meta.genres),
+        authors="\n".join(meta.authors),
         total_chapters=meta.total_chapters,
         total_volumes=meta.total_volumes,
         monitored=opts.monitored,

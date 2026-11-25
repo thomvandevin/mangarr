@@ -5,10 +5,12 @@ Komga's Kobo sync only delivers EPUB."""
 import asyncio
 import io
 import logging
+import re
 import uuid
 import zipfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from html import escape
+from html import escape, unescape
 from pathlib import Path
 
 from PIL import Image, ImageFile
@@ -39,6 +41,65 @@ PAGE = (
     "<style>body{{margin:0}}img{{display:block}}</style></head>"
     '<body><img src="p{n:04d}.jpg" width="{w}" height="{h}" alt=""/></body></html>'
 )
+
+
+@dataclass(frozen=True)
+class BookInfo:
+    """Series metadata written into every copy, so Komga (and the Kobo
+    through it) shows the series, its order, the authors and a summary."""
+
+    series: str = ""
+    authors: tuple[str, ...] = ()
+    description: str = ""
+
+
+def plain_text(html: str) -> str:
+    return " ".join(unescape(re.sub(r"<[^>]+>", " ", html)).split())
+
+
+def series_position(src: Path) -> str:
+    """A volume sorts by its volume number and a loose chapter by its
+    chapter number, which comes after the volumes holding earlier chapters."""
+    match = re.search(r" - Vol\. (\d+(?:\.\d+)?)$", src.stem) or re.search(r" - Ch\. (\d+(?:\.\d+)?)", src.stem)
+    return f"{float(match.group(1)):g}" if match else ""
+
+
+def metadata_xml(src: Path, info: BookInfo) -> str:
+    modified = datetime.fromtimestamp(src.stat().st_mtime, timezone.utc)
+    position = series_position(src)
+    series = (
+        f'<meta property="belongs-to-collection" id="series">{escape(info.series)}</meta>'
+        '<meta refines="#series" property="collection-type">series</meta>'
+        f'<meta refines="#series" property="group-position">{position}</meta>'
+    ) if info.series and position else ""
+    return (
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        f'<dc:identifier id="id">urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, src.as_posix())}</dc:identifier>'
+        f"<dc:title>{escape(src.stem)}</dc:title><dc:language>en</dc:language>"
+        + "".join(f"<dc:creator>{escape(name)}</dc:creator>" for name in info.authors)
+        + (f"<dc:description>{escape(info.description)}</dc:description>" if info.description else "")
+        + series
+        + f'<meta property="dcterms:modified">{modified:%Y-%m-%dT%H:%M:%SZ}</meta>'
+        '<meta property="rendition:layout">pre-paginated</meta>'
+        '<meta property="rendition:spread">none</meta><meta name="cover" content="i0001"/></metadata>'
+    )
+
+
+def refresh_metadata(src: Path, dest: Path, info: BookInfo) -> None:
+    """Swap the metadata of an existing copy without re-encoding its pages."""
+    with zipfile.ZipFile(dest) as epub:
+        opf = epub.read("content.opf").decode()
+        updated = re.sub(r"<metadata .*?</metadata>", lambda _: metadata_xml(src, info), opf, count=1, flags=re.S)
+        if updated == opf:
+            return
+        tmp = dest.with_suffix(".epub.partial")
+        try:
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as out:
+                for entry in epub.infolist():
+                    out.writestr(entry, updated if entry.filename == "content.opf" else epub.read(entry))
+            tmp.rename(dest)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 def decode(data: bytes) -> Image.Image:
@@ -79,7 +140,9 @@ def screen_pages(image: Image.Image, width: int, height: int, rtl: bool) -> list
     return pages
 
 
-def write_epub(src: Path, dest: Path, width: int, height: int, quality: int) -> None:
+def write_epub(
+    src: Path, dest: Path, width: int, height: int, quality: int, info: BookInfo = BookInfo()
+) -> None:
     title = escape(src.stem)
     tmp = dest.with_suffix(".epub.partial")
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -109,13 +172,8 @@ def write_epub(src: Path, dest: Path, width: int, height: int, quality: int) -> 
                 '<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" '
                 'version="3.0" unique-identifier="id" '
                 'prefix="rendition: http://www.idpf.org/vocab/rendition/#">'
-                '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
-                f'<dc:identifier id="id">urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, src.as_posix())}</dc:identifier>'
-                f"<dc:title>{title}</dc:title><dc:language>en</dc:language>"
-                f'<meta property="dcterms:modified">{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}</meta>'
-                '<meta property="rendition:layout">pre-paginated</meta>'
-                '<meta property="rendition:spread">none</meta><meta name="cover" content="i0001"/></metadata>'
-                '<manifest><item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>'
+                + metadata_xml(src, info)
+                + '<manifest><item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>'
                 + "".join(
                     f'<item id="i{n:04d}" href="p{n:04d}.jpg" media-type="image/jpeg"'
                     f'{COVER if n == 1 else ""}/>'
@@ -132,11 +190,14 @@ def write_epub(src: Path, dest: Path, width: int, height: int, quality: int) -> 
 
 
 def mirror(
-    folders: list[tuple[Path, Path]], target: Path, width: int, height: int, quality: int
+    folders: list[tuple[Path, Path]], target: Path, width: int, height: int, quality: int,
+    info: dict[Path, BookInfo] | None = None,
 ) -> None:
     """Make `target` hold exactly one EPUB per CBZ in the (root, series
-    folder) pairs, laid out as under the root."""
-    wanted: dict[Path, Path] = {}
+    folder) pairs, laid out as under the root, carrying the metadata `info`
+    holds for each series folder."""
+    info = info or {}
+    wanted: dict[Path, tuple[Path, BookInfo]] = {}
     # copies inside the library would be picked up as library files, and
     # the cleanup below would delete EPUBs the user keeps there
     if any(target == root or root in target.parents or target in root.parents for root, _ in folders):
@@ -149,17 +210,19 @@ def mirror(
             return
         for src in folder.rglob("*"):
             if src.suffix.lower() in {".cbz", ".zip"}:
-                wanted[target / src.relative_to(root).with_suffix(".epub")] = src
+                wanted[target / src.relative_to(root).with_suffix(".epub")] = (src, info.get(folder, BookInfo()))
     if target.is_dir():
         for stale in [p for p in target.rglob("*.epub") if p not in wanted]:
             stale.unlink()
         for folder in sorted((p for p in target.rglob("*") if p.is_dir()), reverse=True):
             if not any(folder.iterdir()):
                 folder.rmdir()
-    for dest, src in sorted(wanted.items()):
+    for dest, (src, book) in sorted(wanted.items()):
         try:
             if not dest.exists() or dest.stat().st_mtime < src.stat().st_mtime:
-                write_epub(src, dest, width, height, quality)
+                write_epub(src, dest, width, height, quality, book)
+            else:
+                refresh_metadata(src, dest, book)
         except Exception as exc:
             log.warning("e-reader copy of %s failed: %s", src, exc)
 
@@ -167,16 +230,22 @@ def mirror(
 async def sync_ereader_copies() -> None:
     async with session_scope() as session:
         values = await settings_service.get_all(session)
-        folders = [
-            (Path(root), series_dir(Path(root), series))
-            for series, root in await session.execute(
-                select(Series, RootFolder.path)
-                .join(RootFolder, RootFolder.id == Series.root_folder_id)
-                .where(Series.ereader_copy)
+        folders, info = [], {}
+        for series, root in await session.execute(
+            select(Series, RootFolder.path)
+            .join(RootFolder, RootFolder.id == Series.root_folder_id)
+            .where(Series.ereader_copy)
+        ):
+            folder = series_dir(Path(root), series)
+            folders.append((Path(root), folder))
+            info[folder] = BookInfo(
+                series=series.title,
+                authors=tuple(name for name in series.authors.splitlines() if name.strip()),
+                description=plain_text(series.description),
             )
-        ]
     if values["ereader_dir"]:
         await asyncio.to_thread(
             mirror, folders, Path(values["ereader_dir"]),
             int(values["ereader_width"]), int(values["ereader_height"]), int(values["ereader_quality"]),
+            info,
         )

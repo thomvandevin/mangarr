@@ -4,7 +4,7 @@ import zipfile
 
 from PIL import Image
 
-from mangarr.library.ereader import decode, mirror, screen_pages
+from mangarr.library.ereader import BookInfo, decode, mirror, plain_text, screen_pages
 
 
 def _cbz(path, pages, comicinfo="<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>"):
@@ -69,6 +69,30 @@ def test_mirror_refuses_a_target_inside_the_library(tmp_path):
     kept.write_bytes(b"x")
     mirror([(root, root / "A")], root, 1072, 1448, 75)
     assert kept.exists() and not (root / "A" / "A - Ch. 0001.epub").exists()
+
+
+def test_copies_carry_series_metadata_and_follow_its_changes(tmp_path):
+    root, target = tmp_path / "manga", tmp_path / "kobo"
+    folder = root / "A"
+    _cbz(folder / "A - Vol. 03.cbz", [((900, 1300), "red")])
+    _cbz(folder / "A - Ch. 0096.1.cbz", [((900, 1300), "red")])
+    info = {folder: BookInfo("A & B", ("Kamome Shirahama",))}
+    mirror([(root, folder)], target, 1072, 1448, 75, info)
+    copy = target / "A" / "A - Vol. 03.epub"
+    with zipfile.ZipFile(copy) as epub:
+        opf = epub.read("content.opf").decode()
+        page = epub.read("p0001.jpg")
+    assert '<meta property="belongs-to-collection" id="series">A &amp; B</meta>' in opf
+    assert 'property="group-position">3</meta>' in opf
+    assert "<dc:creator>Kamome Shirahama</dc:creator>" in opf
+    with zipfile.ZipFile(target / "A" / "A - Ch. 0096.1.epub") as epub:
+        assert 'property="group-position">96.1</meta>' in epub.read("content.opf").decode()
+
+    info[folder] = BookInfo("A & B", ("Kamome Shirahama",), plain_text("A witch<br><br>story &amp; more"))
+    mirror([(root, folder)], target, 1072, 1448, 75, info)
+    with zipfile.ZipFile(copy) as epub:
+        assert epub.namelist()[0] == "mimetype" and epub.read("p0001.jpg") == page
+        assert "<dc:description>A witch story &amp; more</dc:description>" in epub.read("content.opf").decode()
 
 
 def test_truncated_page_is_still_decoded():
