@@ -107,6 +107,7 @@ class TorznabIndexer(TorrentIndexer):
             link = attrs.get("magneturl") or (enclosure.get("url", "") if enclosure is not None else "") or item.findtext("link", "")
             if urlsplit(link).scheme not in {"magnet", "http", "https"}:
                 continue
+            usenet = enclosure is not None and enclosure.get("type") == "application/x-nzb"
             def number(value):
                 try:
                     return max(0, int(value))
@@ -125,6 +126,7 @@ class TorznabIndexer(TorrentIndexer):
                 torrent_url=(enclosure.get("url", "") if enclosure is not None else "") or (link if link.startswith(("http://", "https://")) else ""),
                 size_bytes=size,
                 seeders=seeders, leechers=number(attrs.get("leechers")) if "leechers" in attrs else max(0, number(attrs.get("peers")) - seeders),
+                usenet=usenet,
             ))
         return releases
 
@@ -132,7 +134,8 @@ class TorznabIndexer(TorrentIndexer):
         from ..download.torrent import fetch_torrent
 
         url = release.torrent_url or release.magnet
-        if not url.startswith(("http://", "https://")):
+        # fetching an NZB counts as a grab at the indexer
+        if release.usenet or not url.startswith(("http://", "https://")):
             return b""
         _, info_hash, content = await fetch_torrent(url)
         release.info_hash = info_hash

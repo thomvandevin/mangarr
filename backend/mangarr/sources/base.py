@@ -66,6 +66,8 @@ class TorrentRelease:
     # Resolved btih identity, including HTTP endpoints that redirect to a
     # magnet and therefore have no downloadable metadata bytes to inspect.
     info_hash: str = ""
+    # an NZB from a usenet indexer: `magnet` holds its download URL
+    usenet: bool = False
 
 
 ChapterRef = tuple[str, float]  # source chapter ID and the expected chapter number

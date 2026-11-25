@@ -6,7 +6,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
-from ..download.client import torrent_client
+from ..download.client import client_enabled, download_client, is_usenet, torrents_enabled, usenet_enabled
 from ..download.qbittorrent import QbtClient
 from ..jobs.tasks import (
     REMOVED_BY_USER,
@@ -101,15 +101,18 @@ async def _remove_downloads(session: AsyncSession, ids: list[int]) -> int:
         and dl.status in ACTIVE
     ]
     # Do not hide work until the download client confirms cancellation.
-    if hashes:
-        values = await registry.apply_settings(session)
-        if values["qbittorrent_enabled"] != "true":
-            raise HTTPException(409, "Enable qBittorrent to stop these torrents before removing them")
-        client = torrent_client(values, QbtClient)
+    values = await registry.apply_settings(session) if hashes else {}
+    for usenet in (False, True):
+        ids = [h for h in hashes if is_usenet(h) == usenet]
+        if not ids:
+            continue
+        if not client_enabled(values, usenet):
+            raise HTTPException(409, "Enable the download client to stop these downloads before removing them")
+        client = download_client(values, ids[0], QbtClient)
         try:
-            await client.delete_torrents(hashes)
+            await client.delete_torrents(ids)
         except Exception as exc:
-            raise HTTPException(502, "Could not stop torrents in qBittorrent; items remain visible. Retry removal.") from exc
+            raise HTTPException(502, "Could not stop downloads in their client; items remain visible. Retry removal.") from exc
         finally:
             await client.close()
     # The worker can complete while removal waits for the database or the
@@ -181,20 +184,20 @@ async def retry_failed_download(
 
     if dl.kind == DownloadKind.TORRENT:
         values = await registry.apply_settings(session)
-        if values["qbittorrent_enabled"] != "true":
-            raise HTTPException(400, "qBittorrent is not enabled in settings")
+        if not client_enabled(values, is_usenet(dl.torrent_hash)):
+            raise HTTPException(400, "The download client is not enabled in settings")
         try:
             existing = None
             if dl.torrent_hash:
                 # Import failures leave completed data seeding. Track that
                 # torrent again without re-fetching an expired signed URL.
-                client = torrent_client(values, QbtClient)
+                client = download_client(values, dl.torrent_hash, QbtClient)
                 try:
                     existing = await client.get_torrent(dl.torrent_hash)
                 finally:
                     await client.close()
             await _queue_series(session, dl.series_id)
-            if existing is None:
+            if existing is None or existing.error:
                 dl.torrent_hash = await submit_torrent(dl.payload, values)
         except HTTPException:
             raise
@@ -243,8 +246,8 @@ async def grab(body: GrabIn, session: AsyncSession = Depends(get_session)):
             session, series, chapter, body.source_name, body.external_id, group=body.group
         )
     elif body.magnet:
-        if values["qbittorrent_enabled"] != "true":
-            raise HTTPException(400, "qBittorrent is not enabled in settings")
+        if not (torrents_enabled(values) or usenet_enabled(values)):
+            raise HTTPException(400, "No download client is enabled in settings")
         if not magnet_btih_hex(body.magnet) and not body.magnet.startswith(("http://", "https://")):
             raise HTTPException(422, "Provide a valid btih magnet or an HTTP(S) torrent URL")
         series = await _queue_series(session, body.series_id)

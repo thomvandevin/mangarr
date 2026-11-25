@@ -21,6 +21,8 @@ class QbtTorrent:
     category: str
     # torrents/files names are relative to this, not to content_path
     save_path: str = ""
+    # set when the client gave the download up
+    error: str = ""
 
     @property
     def is_complete(self) -> bool:
