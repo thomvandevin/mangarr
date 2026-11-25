@@ -60,11 +60,13 @@ from ..filename import parse_filename
 from ..library.archive_members import ArchiveVersion, archive_version
 from ..library.importer import import_torrent_payload
 from ..library.matcher import (
+    ARCHIVE_EXTS,
     find_media_files, find_series_media_files, manual_pdf_mappings, match_files, pdf_file_identity,
     split_pdf_title_conflicts,
 )
 from ..library.naming import chapter_path, series_folder, volume_filename
 from ..library.publish import publish_new_file
+from ..library.scanner import series_dir
 from ..library.volume_merge import merge_chapter_archives
 from ..metadata.anilist import provider as anilist
 from ..metadata.mangaupdates import provider as mangaupdates
@@ -1245,6 +1247,9 @@ async def auto_grab_best_torrent(
             blocked_payloads={(source, payload) for source, payload, _ in failures},
             blocked_hashes={info_hash.lower() for _, _, info_hash in failures if info_hash},
             blocked_titles=imported_titles,
+            library_volumes=await run_file_work(
+                _library_volume_sizes, series_dir(Path(series.root_folder.path), series)
+            ),
         )
     except Exception as exc:
         log.warning("automatic torrent search failed for %r: %s", series.title, safe_error_reason(exc))
@@ -1945,6 +1950,19 @@ async def sync_qbittorrent() -> None:
         finally:
             for client in clients.values():
                 await client.close()
+
+
+def _library_volume_sizes(folder: Path) -> dict[int, int]:
+    """Byte size of each volume archive in a series folder, by volume number."""
+    sizes: dict[int, int] = {}
+    if not folder.is_dir():
+        return sizes
+    for path in folder.iterdir():
+        parsed = parse_filename(path.stem)
+        if (path.suffix.lower() in ARCHIVE_EXTS and parsed.chapter is None
+                and parsed.volume_number is not None and path.is_file()):
+            sizes[parsed.volume_number] = path.stat().st_size
+    return sizes
 
 
 def _remove_usenet_payload(content_path: Path) -> None:

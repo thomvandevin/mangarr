@@ -112,6 +112,42 @@ def torrent_paths(metadata: bytes) -> list[str]:
     return [name] if name else []
 
 
+def torrent_volume_sizes(metadata: bytes) -> dict[int, int]:
+    """Byte size of each single-volume archive in a torrent, by volume number."""
+    info = bdecode(metadata).get(b"info")
+    if not isinstance(info, dict):
+        raise BencodeError("torrent has no info dictionary")
+    files = info.get(b"files")
+    if not isinstance(files, list):
+        files = [{b"path": [info.get(b"name", b"")], b"length": info.get(b"length")}]
+    sizes: dict[int, int] = {}
+    for item in files:
+        components = item.get(b"path") if isinstance(item, dict) else None
+        if not isinstance(components, list) or not components or not isinstance(components[-1], bytes):
+            continue
+        name = PurePosixPath(components[-1].decode("utf-8", "replace"))
+        parsed = parse_filename(name.stem)
+        if (name.suffix.lower() in _ARCHIVE_EXTS and parsed.chapter is None
+                and parsed.volume_number is not None and isinstance(item.get(b"length"), int)):
+            sizes[parsed.volume_number] = item[b"length"]
+    return sizes
+
+
+def differs_from_library(metadata: bytes, release_title: str, library_volumes: dict[int, int]) -> bool:
+    """Whether a release brings a volume the library already holds as other
+    bytes. The import refuses to replace those and fails as a whole. Without
+    a file list, any shared volume counts."""
+    if not library_volumes:
+        return False
+    if metadata:
+        return any(
+            library_volumes.get(volume, size) != size
+            for volume, size in torrent_volume_sizes(metadata).items()
+        )
+    span = parse_filename(release_title).volume
+    return span is not None and any(span[0] <= volume <= span[1] for volume in library_volumes)
+
+
 def coverage_from_text(
     text: str,
     chapters: list[Chapter],
@@ -225,6 +261,7 @@ async def select_best_torrent(
     blocked_payloads: set[tuple[str, str]] | None = None,
     blocked_hashes: set[str] | None = None,
     blocked_titles: set[str] | None = None,
+    library_volumes: dict[int, int] | None = None,
 ) -> TorrentSelection | None:
     # This selector is used by the explicit add-time "Search now" flow, which
     # intentionally searches even when the new series itself is unmonitored.
@@ -288,7 +325,13 @@ async def select_best_torrent(
                 else coverage_from_text(release.title, chapters)
             )
         except Exception:
+            metadata = b""
             coverage = coverage_from_text(release.title, chapters)
+        try:
+            if differs_from_library(metadata, release.title, library_volumes or {}):
+                return TorrentSelection(release=release, coverage=set())
+        except BencodeError:
+            pass
         return TorrentSelection(release=release, coverage=coverage & wanted)
 
     inspected = await asyncio.gather(*(inspect(item) for item in candidates))
