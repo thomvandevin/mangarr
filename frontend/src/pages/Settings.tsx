@@ -944,6 +944,10 @@ export default function Settings() {
             <label>Screen height (px)</label>
             {text("ereader_height")}
           </div>
+          <div className="form-row">
+            <label>JPEG quality (1-95)</label>
+            {text("ereader_quality")}
+          </div>
         </div>
 
         <div className="settings-section">
