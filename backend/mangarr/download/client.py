@@ -1,7 +1,7 @@
 """The download clients selected in Settings: one for torrents, SABnzbd for usenet."""
 
 from .qbittorrent import QbtClient
-from .sabnzbd import NZO_PREFIX, SabnzbdClient
+from .sabnzbd import NZB_ID_PREFIX, SabnzbdClient
 from .transmission import TransmissionClient
 
 
@@ -19,7 +19,7 @@ def usenet_client(values: dict[str, str]) -> SabnzbdClient:
 
 def is_usenet(download_id: str) -> bool:
     """Usenet downloads keep SABnzbd's job id where torrents keep their info hash."""
-    return download_id.startswith(NZO_PREFIX)
+    return download_id.startswith(NZB_ID_PREFIX)
 
 
 def torrents_enabled(values: dict[str, str]) -> bool:
