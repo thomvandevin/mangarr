@@ -58,6 +58,7 @@ function emptyConfig(provider: ImportListProvider, rootFolderId: number): Import
     monitored: true,
     monitor_mode: "all",
     search_now: false,
+    clean_removed: false,
   };
 }
 
@@ -187,7 +188,8 @@ function ListEditor({
             onChange={(e) => {
               const next = providers.find((p) => p.kind === e.target.value)!;
               setForm({ ...emptyConfig(next, form.root_folder_id), monitored: form.monitored,
-                monitor_mode: form.monitor_mode, search_now: form.search_now });
+                monitor_mode: form.monitor_mode, search_now: form.search_now,
+                clean_removed: form.clean_removed });
               setPreview(null);
             }}
           >
@@ -321,6 +323,10 @@ function ListEditor({
       <div className="form-row">
         <label>Search for missing content</label>
         <Toggle label="Search for missing content" on={form.search_now} onChange={(v) => set("search_now", v)} />
+      </div>
+      <div className="form-row">
+        <label>Delete series that leave the list</label>
+        <Toggle label="Delete series that leave the list" on={form.clean_removed} onChange={(v) => set("clean_removed", v)} />
       </div>
       <div className="form-row">
         <label>Sync automatically</label>
@@ -499,6 +505,7 @@ function ListCard({
         <div className="list-sync-result" role="status">
           Found {result.fetched} · added {result.added}
           {result.existing > 0 && ` · ${result.existing} already owned`}
+          {result.removed > 0 && ` · ${result.removed} removed`}
           {result.failed > 0 && ` · ${result.failed} failed`}
         </div>
       )}

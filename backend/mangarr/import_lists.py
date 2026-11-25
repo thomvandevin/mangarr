@@ -8,8 +8,10 @@ back; only entries that failed to add are retried."""
 import asyncio
 import json
 import logging
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 from sqlalchemy import select
@@ -18,12 +20,14 @@ from sqlalchemy.orm import selectinload
 
 from . import USER_AGENT
 from .adding import AddOptions, LibraryIndex, SeriesExists, create_series, start_refreshes
+from .automation import apply_monitor_mode
 from .db import session_scope
+from .library.scanner import chapters_under_folders, series_dir
 from .metadata.anilist import login_url as anilist_login_url
 from .metadata.anilist import provider as anilist
 from .metadata.mangaupdates import API_URL as MU_API_URL
 from .metadata.mangaupdates import provider as mangaupdates
-from .models import ImportList, ImportListEntry, RootFolder
+from .models import ImportList, ImportListEntry, RootFolder, Series
 from .util import RateLimiter, normalize_title, rl_request
 
 log = logging.getLogger(__name__)
@@ -335,6 +339,7 @@ class PreviewItem:
     entry: ListEntry
     action: str  # add | in_library | seen
     series_id: int | None = None
+    restored: bool = False
 
 
 @dataclass
@@ -343,6 +348,7 @@ class SyncResult:
     added: int = 0
     existing: int = 0
     failed: int = 0
+    removed: int = 0
     preview: list[PreviewItem] = field(default_factory=list)
 
 
@@ -359,17 +365,59 @@ async def preview_list(
     library = await LibraryIndex.load(session)
     for entry in entries:
         rec = recorded.get(entry.key)
-        if rec is not None and rec.status != "failed":
+        restored = rec is not None and rec.status == "removed"
+        if rec is not None and rec.status != "failed" and not restored:
             result.preview.append(PreviewItem(entry, "seen", rec.series_id))
             continue
         existing = library.find(
             entry.anilist_id, entry.mangaupdates_id, [entry.title, *entry.alt_titles]
         )
         if existing is not None:
-            result.preview.append(PreviewItem(entry, "in_library", existing))
+            result.preview.append(PreviewItem(entry, "in_library", existing, restored))
         else:
             result.preview.append(PreviewItem(entry, "add"))
     return result
+
+
+async def _load_series(session: AsyncSession, series_id: int) -> Series | None:
+    return (await session.execute(
+        select(Series).options(selectinload(Series.chapters)).where(Series.id == series_id)
+    )).scalar_one_or_none()
+
+
+async def _set_monitored(session: AsyncSession, series_id: int, monitored: bool) -> Series | None:
+    series = await _load_series(session, series_id)
+    if series is not None:
+        series.monitored = monitored
+        apply_monitor_mode(series, series.chapters, resolve=False)
+    return series
+
+
+async def _clean_removed(
+    session: AsyncSession, recorded: dict[str, ImportListEntry], listed: set[str]
+) -> int:
+    """Unmonitor every series whose entry left the list and delete its
+    library folder. Extra folders hold files the user placed and stay."""
+    from .jobs.tasks import series_lock
+
+    removed = 0
+    for rec in recorded.values():
+        if rec.key in listed or rec.status not in ("added", "existing") or rec.series_id is None:
+            continue
+        async with series_lock(rec.series_id):
+            series = await _set_monitored(session, rec.series_id, False)
+            root = series and series.root_folder_id and await session.get(RootFolder, series.root_folder_id)
+            if root:
+                folder = series_dir(Path(root.path), series)
+                # a series without a folder name must never resolve to the root itself
+                if Path(root.path) in folder.parents:
+                    for chapter in chapters_under_folders(series.chapters, {folder}):
+                        chapter.downloaded, chapter.file_path = False, ""
+                    await asyncio.to_thread(shutil.rmtree, folder, True)
+                    log.info("import list: %r left the list, deleted %s", series.title, folder)
+        rec.status, rec.detail = "removed", "left the list"
+        removed += 1
+    return removed
 
 
 async def _add_entry(entry: ListEntry, opts: AddOptions) -> tuple[str, int | None, str]:
@@ -422,6 +470,12 @@ async def sync_list(session: AsyncSession, lst: ImportList) -> SyncResult:
             monitor_mode=lst.monitor_mode,
             alt_titles=[],
         )
+        # an empty answer is far more often a provider hiccup than a list
+        # the user emptied, and cleaning on it would delete the whole library
+        if lst.clean_removed and result.fetched:
+            result.removed = await _clean_removed(
+                session, recorded, {item.entry.key for item in result.preview}
+            )
         added_ids: list[int] = []
         for item in result.preview:
             if item.action == "seen":
@@ -429,6 +483,9 @@ async def sync_list(session: AsyncSession, lst: ImportList) -> SyncResult:
             entry = item.entry
             if item.action == "in_library":
                 status, series_id, detail = "existing", item.series_id, ""
+                if item.restored:
+                    await _set_monitored(session, series_id, True)
+                    added_ids.append(series_id)
             else:
                 opts.alt_titles = entry.alt_titles
                 status, series_id, detail = await _add_entry(entry, opts)
