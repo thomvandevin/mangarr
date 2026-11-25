@@ -64,7 +64,7 @@ def screen_pages(image: Image.Image, width: int, height: int, rtl: bool) -> list
     return pages
 
 
-def write_epub(src: Path, dest: Path, width: int, height: int) -> None:
+def write_epub(src: Path, dest: Path, width: int, height: int, quality: int) -> None:
     title = escape(src.stem)
     tmp = dest.with_suffix(".epub.partial")
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +84,7 @@ def write_epub(src: Path, dest: Path, width: int, height: int) -> None:
                     for page in screen_pages(image, width, height, rtl):
                         count += 1
                         data = io.BytesIO()
-                        page.save(data, "JPEG", quality=85)
+                        page.save(data, "JPEG", quality=quality, optimize=True)
                         epub.writestr(f"p{count:04d}.jpg", data.getvalue())
                         epub.writestr(f"p{count:04d}.xhtml", PAGE.format(n=count, w=page.width, h=page.height))
             if not count:
@@ -116,7 +116,9 @@ def write_epub(src: Path, dest: Path, width: int, height: int) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def mirror(folders: list[tuple[Path, Path]], target: Path, width: int, height: int) -> None:
+def mirror(
+    folders: list[tuple[Path, Path]], target: Path, width: int, height: int, quality: int
+) -> None:
     """Make `target` hold exactly one EPUB per CBZ in the (root, series
     folder) pairs, laid out as under the root."""
     wanted: dict[Path, Path] = {}
@@ -142,7 +144,7 @@ def mirror(folders: list[tuple[Path, Path]], target: Path, width: int, height: i
     for dest, src in sorted(wanted.items()):
         try:
             if not dest.exists() or dest.stat().st_mtime < src.stat().st_mtime:
-                write_epub(src, dest, width, height)
+                write_epub(src, dest, width, height, quality)
         except Exception as exc:
             log.warning("e-reader copy of %s failed: %s", src, exc)
 
@@ -161,5 +163,5 @@ async def sync_ereader_copies() -> None:
     if values["ereader_dir"]:
         await asyncio.to_thread(
             mirror, folders, Path(values["ereader_dir"]),
-            int(values["ereader_width"]), int(values["ereader_height"]),
+            int(values["ereader_width"]), int(values["ereader_height"]), int(values["ereader_quality"]),
         )

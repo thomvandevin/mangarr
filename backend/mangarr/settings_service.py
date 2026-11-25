@@ -72,6 +72,7 @@ DEFAULTS: dict[str, str] = {
     "ereader_dir": "",
     "ereader_width": "1072",
     "ereader_height": "1448",
+    "ereader_quality": "75",
     # Torrent import: "hardlink" keeps seeding without using double the
     # space (needs downloads + library on one filesystem); "copy" is the
     # safe cross-filesystem fallback.
@@ -190,6 +191,7 @@ def validate(values: dict[str, str]) -> None:
         ("import_list_sync_hours", 1),
         ("ereader_width", 1),
         ("ereader_height", 1),
+        ("ereader_quality", 1),
     ):
         if key not in values:
             continue

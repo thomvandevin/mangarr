@@ -35,7 +35,7 @@ def test_mirror_follows_the_library(tmp_path):
     _cbz(one, [((900, 1300), "red"), ((1800, 1300), "blue")])
     _cbz(two, [((900, 1300), "red")], comicinfo="<ComicInfo/>")
     folders = [(root, root / "A"), (root, root / "B")]
-    mirror(folders, target, 1072, 1448)
+    mirror(folders, target, 1072, 1448, 75)
     with zipfile.ZipFile(target / "A" / "A - Ch. 0001.epub") as epub:
         names = epub.namelist()
         assert names[0] == "mimetype" and names.count("p0003.jpg") == 1 and "p0004.jpg" not in names
@@ -48,17 +48,17 @@ def test_mirror_follows_the_library(tmp_path):
     _cbz(one, [((900, 1300), "green")])
     os.utime(one, ns=(made + 10**9, made + 10**9))
     two.unlink()
-    mirror(folders, target, 1072, 1448)
+    mirror(folders, target, 1072, 1448, 75)
     assert not (target / "B").exists()
     with zipfile.ZipFile(target / "A" / "A - Ch. 0001.epub") as epub:
         assert "p0002.jpg" not in epub.namelist()
     _cbz(two, [((900, 1300), "red")])
-    mirror(folders[:1], target, 1072, 1448)
+    mirror(folders[:1], target, 1072, 1448, 75)
     assert not (target / "B").exists()
 
     for path in root.iterdir():
         path.rename(tmp_path / path.name)
-    mirror(folders, target, 1072, 1448)
+    mirror(folders, target, 1072, 1448, 75)
     assert (target / "A" / "A - Ch. 0001.epub").exists()
 
 
@@ -67,5 +67,5 @@ def test_mirror_refuses_a_target_inside_the_library(tmp_path):
     _cbz(root / "A" / "A - Ch. 0001.cbz", [((900, 1300), "red")])
     kept = root / "A" / "mine.epub"
     kept.write_bytes(b"x")
-    mirror([(root, root / "A")], root, 1072, 1448)
+    mirror([(root, root / "A")], root, 1072, 1448, 75)
     assert kept.exists() and not (root / "A" / "A - Ch. 0001.epub").exists()
