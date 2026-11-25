@@ -4,6 +4,7 @@ Komga's Kobo sync only delivers EPUB."""
 
 import asyncio
 import io
+import json
 import logging
 import re
 import time
@@ -22,6 +23,7 @@ from .. import settings_service
 from ..automation import MERGED_FILE_SOURCE
 from ..config import config
 from ..db import session_scope
+from ..komga import Komga, from_settings as komga_from_settings
 from ..models import Chapter, RootFolder, Series, SeriesSourceLink
 from ..sources.mangadex import source as mangadex
 from .archive_members import archive_files, archive_pages
@@ -90,13 +92,14 @@ def metadata_xml(src: Path, info: BookInfo) -> str:
     )
 
 
-def refresh_metadata(src: Path, dest: Path, info: BookInfo) -> None:
-    """Swap the metadata of an existing copy without re-encoding its pages."""
+def refresh_metadata(src: Path, dest: Path, info: BookInfo) -> bool:
+    """Swap the metadata of an existing copy without re-encoding its pages.
+    Returns whether the copy changed."""
     with zipfile.ZipFile(dest) as epub:
         opf = epub.read("content.opf").decode()
         updated = re.sub(r"<metadata .*?</metadata>", lambda _: metadata_xml(src, info), opf, count=1, flags=re.S)
         if updated == opf:
-            return
+            return False
         tmp = dest.with_suffix(".epub.partial")
         try:
             with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as out:
@@ -105,6 +108,7 @@ def refresh_metadata(src: Path, dest: Path, info: BookInfo) -> None:
             tmp.rename(dest)
         finally:
             tmp.unlink(missing_ok=True)
+    return True
 
 
 def decode(data: bytes) -> Image.Image:
@@ -200,29 +204,31 @@ def write_epub(
 def mirror(
     folders: list[tuple[Path, Path]], target: Path, width: int, height: int, quality: int,
     info: dict[Path, BookInfo] | None = None, covers: dict[Path, Path] | None = None,
-) -> None:
+) -> bool:
     """Make `target` hold exactly one EPUB per CBZ in the (root, series
     folder) pairs, laid out as under the root, carrying the metadata `info`
     holds for each series folder and opening with the cover image `covers`
-    holds for an archive."""
+    holds for an archive. Returns whether any copy changed."""
     info, covers = info or {}, covers or {}
     wanted: dict[Path, tuple[Path, BookInfo]] = {}
+    changed = False
     # copies inside the library would be picked up as library files, and
     # the cleanup below would delete EPUBs the user keeps there
     if any(target == root or root in target.parents or target in root.parents for root, _ in folders):
         log.warning("e-reader copies skipped: %s overlaps a library root folder", target)
-        return
+        return changed
     for root, folder in folders:
         # an unmounted library must not empty the reader
         if problem := root_unavailable(root):
             log.warning("e-reader copies skipped: %s", problem)
-            return
+            return changed
         for src in folder.rglob("*"):
             if src.suffix.lower() in {".cbz", ".zip"}:
                 wanted[target / src.relative_to(root).with_suffix(".epub")] = (src, info.get(folder, BookInfo()))
     if target.is_dir():
         for stale in [p for p in target.rglob("*.epub") if p not in wanted]:
             stale.unlink()
+            changed = True
         for folder in sorted((p for p in target.rglob("*") if p.is_dir()), reverse=True):
             if not any(folder.iterdir()):
                 folder.rmdir()
@@ -233,10 +239,12 @@ def mirror(
                 src.stat().st_mtime, cover.stat().st_mtime if cover else 0
             ):
                 write_epub(src, dest, width, height, quality, book, cover)
+                changed = True
             else:
-                refresh_metadata(src, dest, book)
+                changed = refresh_metadata(src, dest, book) or changed
         except Exception as exc:
             log.warning("e-reader copy of %s failed: %s", src, exc)
+    return changed
 
 
 COVER_CHECK_SECONDS = 24 * 3600
@@ -266,7 +274,7 @@ async def volume_covers(series_id: int, mangadex_id: str, volumes: set[int]) -> 
 async def sync_ereader_copies() -> None:
     async with session_scope() as session:
         values = await settings_service.get_all(session)
-        folders, info, merged = [], {}, []
+        folders, info, merged, pending = [], {}, [], []
         for series, root in await session.execute(
             select(Series, RootFolder.path)
             .join(RootFolder, RootFolder.id == Series.root_folder_id)
@@ -288,17 +296,55 @@ async def sync_ereader_copies() -> None:
                 select(SeriesSourceLink.external_id)
                 .where(SeriesSourceLink.series_id == series.id, SeriesSourceLink.source_name == mangadex.name)
             )).scalar_one_or_none()
-            if link and files:
-                merged.append((series.id, link, files))
+            by_volume = {int(m.group(1)): f for f in files if (m := re.search(r" - Vol\. (\d+)$", f.stem))}
+            if link and by_volume:
+                merged.append((series.id, link, by_volume))
+            if series.pending_progress:
+                pending.append((series.id, folder.name, json.loads(series.pending_progress), by_volume))
     if not values["ereader_dir"]:
         return
     covers = {}
-    for series_id, link, files in merged:
-        by_volume = {int(m.group(1)): f for f in files if (m := re.search(r" - Vol\. (\d+)$", f.stem))}
+    for series_id, link, by_volume in merged:
         for volume, cover in (await volume_covers(series_id, link, set(by_volume))).items():
             covers[by_volume[volume]] = cover
-    await asyncio.to_thread(
+    changed = await asyncio.to_thread(
         mirror, folders, Path(values["ereader_dir"]),
         int(values["ereader_width"]), int(values["ereader_height"]), int(values["ereader_quality"]),
         info, covers,
     )
+    if komga := komga_from_settings(values):
+        await update_komga(*komga, changed, pending, covers)
+
+
+async def update_komga(
+    komga: Komga, library_id: str, changed: bool,
+    pending: list[tuple[int, str, dict[str, int | str], dict[int, Path]]], covers: dict[Path, Path],
+) -> None:
+    """Scan Komga's library when copies changed, then give each merged volume
+    Komga now lists the progress read from its chapters."""
+    if changed:
+        try:
+            await komga.scan(library_id)
+        except Exception as exc:
+            log.warning("Komga scan failed: %s", exc)
+    for series_id, name, waiting, by_volume in pending:
+        done = []
+        try:
+            books = await komga.series_books(library_id, name)
+            for volume, read in waiting.items():
+                src = by_volume.get(int(volume))
+                book = books.get(src.stem) if src else None
+                if not book or not (book.get("media") or {}).get("pagesCount"):
+                    continue  # not scanned yet
+                # the cover is the copy's first page, ahead of the chapters
+                page = None if read == "completed" else read + 1 if src in covers else read
+                await komga.set_progress(book["id"], page)
+                done.append(volume)
+        except Exception as exc:
+            log.warning("Komga progress for series %d failed: %s", series_id, exc)
+        if done:
+            async with session_scope() as session:
+                series = await session.get(Series, series_id)
+                left = {k: v for k, v in json.loads(series.pending_progress or "{}").items() if k not in done}
+                series.pending_progress = json.dumps(left) if left else ""
+                await session.commit()

@@ -960,6 +960,22 @@ export default function Settings() {
             New series pack each finished volume into one archive, so the e-reader gets volumes instead of
             chapters. Each series can still change this on its own page.
           </p>
+          <div className="form-row">
+            <label>Komga URL</label>
+            {text("komga_url")}
+          </div>
+          <div className="form-row">
+            <label>Komga API key</label>
+            {text("komga_api_key", true)}
+          </div>
+          <div className="form-row">
+            <label>Komga library id</label>
+            {text("komga_library_id")}
+          </div>
+          <p className="section-hint">
+            The Komga library that holds this folder. It is scanned as soon as copies change, and when chapters
+            merge into a volume, the reading progress in those chapters carries over to the volume.
+          </p>
         </div>
 
         <div className="settings-section">

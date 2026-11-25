@@ -136,11 +136,16 @@ DEFAULTS: dict[str, str] = {
     "kavita_scan_mode": "series",
     # JSON {"<root_folder_id>": <kavita library id>}; empty = match by path
     "kavita_library_map": "",
+    # Komga serving the e-reader copies: scanned when copies change, and
+    # reading progress moves from chapters into the volume they merge into.
+    "komga_url": "",
+    "komga_api_key": "",
+    "komga_library_id": "",
 }
 
 SECRET_KEYS = {
     "mangadex_client_secret", "mangadex_password", "qbittorrent_password",
-    "webhook_secret", "kavita_api_key", "download_proxy_url", "sabnzbd_api_key",
+    "webhook_secret", "kavita_api_key", "komga_api_key", "download_proxy_url", "sabnzbd_api_key",
     *{f"source_{name}_proxy_url" for name in SOURCE_PROXY_NAMES},
 }
 

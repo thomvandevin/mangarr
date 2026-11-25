@@ -23,6 +23,7 @@ MASK = "••••••••"
 SECRET_DESTINATIONS = {
     "webhook_secret": ("webhook_url",),
     "kavita_api_key": ("kavita_url",),
+    "komga_api_key": ("komga_url",),
     "qbittorrent_password": ("qbittorrent_url", "qbittorrent_username"),
     "sabnzbd_api_key": ("sabnzbd_url",),
 }
