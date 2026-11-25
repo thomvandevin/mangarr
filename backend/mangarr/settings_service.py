@@ -50,6 +50,11 @@ DEFAULTS: dict[str, str] = {
     "qbittorrent_password": "",
     "qbittorrent_category": "mangarr",
     "qbittorrent_enabled": "false",
+    # SABnzbd takes the NZBs of usenet indexers configured as Torznab feeds
+    "sabnzbd_enabled": "false",
+    "sabnzbd_url": "http://localhost:8080",
+    "sabnzbd_api_key": "",
+    "sabnzbd_category": "mangarr",
     # Automatic add-time torrent selection inspects .torrent metadata first,
     # then chooses one seeded release with the most missing-chapter coverage.
     "torrent_auto_max_size_gib": "30",
@@ -124,7 +129,7 @@ DEFAULTS: dict[str, str] = {
 
 SECRET_KEYS = {
     "mangadex_client_secret", "mangadex_password", "qbittorrent_password",
-    "webhook_secret", "kavita_api_key", "download_proxy_url",
+    "webhook_secret", "kavita_api_key", "download_proxy_url", "sabnzbd_api_key",
     *{f"source_{name}_proxy_url" for name in SOURCE_PROXY_NAMES},
 }
 

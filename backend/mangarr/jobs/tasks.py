@@ -16,6 +16,7 @@ from pathlib import Path
 from tempfile import mkdtemp
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs, urlsplit
 
 from sqlalchemy import and_, func, or_, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,7 +45,15 @@ from ..chapter_metadata import (
 from ..db import session_scope
 from ..download.direct import DuplicateChapterPagesError, download_chapter_to_cbz
 from ..download.images import ImageOptimization
-from ..download.client import torrent_client
+from ..download.client import (
+    client_enabled,
+    download_client,
+    is_usenet,
+    torrent_client,
+    torrents_enabled,
+    usenet_client,
+    usenet_enabled,
+)
 from ..download.qbittorrent import QbtClient
 from ..download.torrent import magnet_btih_hex
 from ..filename import parse_filename
@@ -84,7 +93,14 @@ from ..titles import (
     source_title_key,
 )
 from ..torrent_selection import select_best_torrent
-from ..util import finish_before_cancel, is_transient_error, normalize_title, run_file_work, safe_error_reason
+from ..util import (
+    finish_before_cancel,
+    is_transient_error,
+    normalize_title,
+    run_file_work,
+    safe_error_reason,
+    sanitize_filename,
+)
 
 if TYPE_CHECKING:
     from ..metadata_issues import ArchiveOwnership
@@ -1059,20 +1075,28 @@ def torrent_save_path(base: str, category: str) -> str | None:
 
 
 async def submit_torrent(magnet: str, values: dict[str, str]) -> str:
-    """Submit a magnet or torrent-file URL and return its normalized info hash.
+    """Submit a magnet, torrent-file URL or NZB URL and return the id its
+    download client tracks it by: the normalized info hash, or SABnzbd's job id.
 
     Kept separate from the database row creation so a failed torrent can be
     submitted again without replacing its Activity entry.
     """
     torrent_data = None
     if magnet.startswith(("http://", "https://")):
+        from ..download.sabnzbd import is_nzb
         from ..download.torrent import fetch_torrent
 
+        # Prowlarr names the release in its download link
+        title = parse_qs(urlsplit(magnet).query).get("file", [""])[0]
         magnet, torrent_hash, torrent_data = await fetch_torrent(magnet)
+        if torrent_data is not None and is_nzb(torrent_data):
+            return await _submit_nzb(torrent_data, title, values)
     else:
         torrent_hash = magnet_btih_hex(magnet)
     if not torrent_hash:
         raise ValueError("magnet link must include a valid btih info hash")
+    if not torrents_enabled(values):
+        raise ValueError("the torrent client is not enabled in settings")
     client = torrent_client(values, QbtClient)
     try:
         category = values["qbittorrent_category"]
@@ -1090,6 +1114,18 @@ async def submit_torrent(magnet: str, values: dict[str, str]) -> str:
     finally:
         await client.close()
     return torrent_hash
+
+
+async def _submit_nzb(content: bytes, title: str, values: dict[str, str]) -> str:
+    if not usenet_enabled(values):
+        raise ValueError("SABnzbd is not enabled in settings")
+    client = usenet_client(values)
+    try:
+        category = values["sabnzbd_category"]
+        await client.ensure_category(category)
+        return await client.add_nzb(content, sanitize_filename(title) or "mangarr", category)
+    finally:
+        await client.close()
 
 
 async def enqueue_torrent(
@@ -1141,7 +1177,7 @@ async def auto_grab_best_torrent(
     older in-flight packs must continue to block duplicate direct grabs.
     """
     if (
-        values.get("qbittorrent_enabled") != "true"
+        not (torrents_enabled(values) or usenet_enabled(values))
         or not series.root_folder
         or not registry.enabled_torrent_indexers(values)
     ):
@@ -1804,7 +1840,7 @@ async def _update_if_still_synced(session: AsyncSession, dl: Download, **values)
 async def sync_qbittorrent() -> None:
     async with session_scope() as session:
         values = await registry.apply_settings(session)
-        if values["qbittorrent_enabled"] != "true":
+        if not (torrents_enabled(values) or usenet_enabled(values)):
             return
         result = await session.execute(
             select(Download).where(
@@ -1815,11 +1851,15 @@ async def sync_qbittorrent() -> None:
         downloads = result.scalars().all()
         if not downloads:
             return
-        client = torrent_client(values, QbtClient)
+        clients = {}
         try:
             for dl in downloads:
-                if not dl.torrent_hash:
+                usenet = is_usenet(dl.torrent_hash)
+                if not dl.torrent_hash or not client_enabled(values, usenet):
                     continue
+                if usenet not in clients:
+                    clients[usenet] = download_client(values, dl.torrent_hash, QbtClient)
+                client = clients[usenet]
                 torrent = await client.get_torrent(dl.torrent_hash)
                 if torrent is None:
                     misses = _torrent_missing_counts.get(dl.id, 0) + 1
@@ -1834,6 +1874,12 @@ async def sync_qbittorrent() -> None:
                                         "marking failed", dl.id, dl.title)
                     continue
                 _torrent_missing_counts.pop(dl.id, None)
+                if torrent.error:
+                    if await _update_if_still_synced(
+                        session, dl, status=DownloadStatus.FAILED, error=torrent.error,
+                    ):
+                        log.warning("download %d (%r) failed in its client: %s", dl.id, dl.title, torrent.error)
+                    continue
                 dl.progress = torrent.progress
                 if torrent.is_complete and torrent.content_path:
                     # import only the torrent's own files: under qBittorrent's
@@ -1864,13 +1910,18 @@ async def sync_qbittorrent() -> None:
                             continue
                         await _import_torrent(session, dl, Path(torrent.content_path),
                                               values, files=files)
+                        # nothing seeds a usenet download, so its copy in the
+                        # downloads folder goes once the library has the files
+                        if usenet and dl.status == DownloadStatus.DONE:
+                            await client.delete_torrents([dl.torrent_hash])
                     finally:
                         if lock is not None:
                             lock.release()
                 else:
                     await session.commit()
         finally:
-            await client.close()
+            for client in clients.values():
+                await client.close()
 
 
 def _place_torrent_files(content_path, series, chapters, *args, **kwargs):

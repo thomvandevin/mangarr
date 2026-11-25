@@ -447,6 +447,11 @@ class QbtTestIn(BaseModel):
     client: Literal["qbittorrent", "transmission"] = "qbittorrent"
 
 
+class SabnzbdTestIn(BaseModel):
+    url: str
+    api_key: str
+
+
 class WebhookTestIn(BaseModel):
     url: str
     secret: str = ""

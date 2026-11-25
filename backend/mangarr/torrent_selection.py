@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from .download.client import usenet_enabled
 from .download.torrent import magnet_btih_hex, torrent_info_hash
 from .filename import parse_filename
 from .models import Chapter, Series
@@ -229,7 +230,8 @@ async def select_best_torrent(
                     or key in seen
                     or (release.source_name, key) in (blocked_payloads or set())
                     or (key.startswith("magnet:") and magnet_btih_hex(key) in blocked_hashes)
-                    or release.seeders < min_seeders
+                    or (release.usenet and not usenet_enabled(values or {}))
+                    or (not release.usenet and release.seeders < min_seeders)
                     or release.size_bytes <= 0
                     or release.size_bytes > max_size_bytes
                     or not release_matches_series(release.title, series)

@@ -777,6 +777,17 @@ export default function Settings() {
     onError: (e) => setQbtTest(`✖ ${(e as Error).message}`),
   });
 
+  const [sabnzbdTest, setSabnzbdTest] = useState<string | null>(null);
+  const testSabnzbd = useMutation({
+    mutationFn: () =>
+      api.post<{ version: string }>("/settings/sabnzbd/test", {
+        url: form.sabnzbd_url,
+        api_key: form.sabnzbd_api_key,
+      }),
+    onSuccess: (d) => setSabnzbdTest(`✔ Connected: SABnzbd ${d.version}`),
+    onError: (e) => setSabnzbdTest(`✖ ${(e as Error).message}`),
+  });
+
   const [webhookTest, setWebhookTest] = useState<string | null>(null);
   const [applyingTitlePref, setApplyingTitlePref] = useState(false);
   const testWebhook = useMutation({
@@ -1053,6 +1064,42 @@ export default function Settings() {
             {qbtTest && (
               <span style={{ fontSize: 13, color: qbtTest.startsWith("✔") ? "var(--success)" : "var(--danger)" }}>
                 {<><Icon name={qbtTest.startsWith("✔") ? "check" : "close"} /> {qbtTest.replace(/^[✔✖]\s*/, "")}</>}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Usenet download client</h3>
+          <p className="section-hint">
+            NZB releases from usenet indexers (added as Torznab indexers, for example through Prowlarr) are sent
+            to SABnzbd, imported when complete and then removed from its downloads folder. SABnzbd&apos;s completed
+            folder must be visible to mangarr at the same path. Re-enter the API key after changing the URL.
+          </p>
+          <div className="form-row">
+            <label>Enabled</label>
+            <Toggle label="Enable SABnzbd" on={form.sabnzbd_enabled === "true"} onChange={setBool("sabnzbd_enabled")} />
+          </div>
+          <div className="form-row">
+            <label>URL</label>
+            {text("sabnzbd_url")}
+          </div>
+          <div className="form-row">
+            <label>API key</label>
+            {text("sabnzbd_api_key", true)}
+          </div>
+          <div className="form-row">
+            <label>Category</label>
+            {text("sabnzbd_category")}
+          </div>
+          <div className="form-row">
+            <label></label>
+            <button className="btn" onClick={() => testSabnzbd.mutate()} disabled={testSabnzbd.isPending}>
+              Test Connection
+            </button>
+            {sabnzbdTest && (
+              <span style={{ fontSize: 13, color: sabnzbdTest.startsWith("✔") ? "var(--success)" : "var(--danger)" }}>
+                {<><Icon name={sabnzbdTest.startsWith("✔") ? "check" : "close"} /> {sabnzbdTest.replace(/^[✔✖]\s*/, "")}</>}
               </span>
             )}
           </div>

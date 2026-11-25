@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from .. import settings_service
 from ..automation import select_for_series
 from ..db import get_session
+from ..download.client import client_enabled, torrents_enabled, usenet_enabled
 from ..metadata.anilist import provider as anilist
 from ..metadata.mangaupdates import provider as mangaupdates
 from ..models import Chapter, Series
@@ -279,7 +280,7 @@ async def search_releases(
     for part in direct_parts:
         releases.extend(part)
 
-    if include_torrents and values["qbittorrent_enabled"] == "true":
+    if include_torrents and (torrents_enabled(values) or usenet_enabled(values)):
         async def torrent_releases_for_indexer(indexer) -> list[ReleaseOut]:
             out: list[ReleaseOut] = []
             torrent_seen: set[str] = set()
@@ -296,7 +297,7 @@ async def search_releases(
                     continue
                 for t in torrents[:25]:
                     key = t.magnet or t.url or t.title
-                    if key in torrent_seen:
+                    if key in torrent_seen or not client_enabled(values, t.usenet):
                         continue
                     torrent_seen.add(key)
                     out.append(

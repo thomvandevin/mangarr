@@ -3,13 +3,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import kavita, notifications, settings_service
 from ..db import get_session
-from ..download import transmission
+from ..download import sabnzbd, transmission
 from ..download.qbittorrent import QbtError, test_connection
 from ..schemas import (
     KavitaLibraryOut,
     KavitaTestIn,
     KavitaTestOut,
     QbtTestIn,
+    SabnzbdTestIn,
     WebhookTestIn,
 )
 
@@ -23,6 +24,7 @@ SECRET_DESTINATIONS = {
     "webhook_secret": ("webhook_url",),
     "kavita_api_key": ("kavita_url",),
     "qbittorrent_password": ("qbittorrent_url", "qbittorrent_username"),
+    "sabnzbd_api_key": ("sabnzbd_url",),
 }
 
 
@@ -119,6 +121,18 @@ async def qbt_test(body: QbtTestIn, session: AsyncSession = Depends(get_session)
     try:
         test = transmission.test_connection if body.client == "transmission" else test_connection
         version = await test(body.url, body.username, password)
+    except QbtError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "version": version}
+
+
+@router.post("/sabnzbd/test")
+async def sabnzbd_test(body: SabnzbdTestIn, session: AsyncSession = Depends(get_session)):
+    api_key = body.api_key
+    if api_key == MASK:
+        api_key = retained_secret(await settings_service.get_all(session), "sabnzbd_api_key", {"sabnzbd_url": body.url})
+    try:
+        version = await sabnzbd.test_connection(body.url, api_key)
     except QbtError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "version": version}

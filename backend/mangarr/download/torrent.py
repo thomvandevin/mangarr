@@ -6,6 +6,8 @@ import re
 
 import httpx
 
+from .sabnzbd import is_nzb
+
 MAX_TORRENT_SIZE = 10_000_000
 _BTIH_RE = re.compile(r"btih:([0-9a-fA-F]{40}|[A-Z2-7]{32})")
 
@@ -105,5 +107,7 @@ async def fetch_torrent(url: str) -> tuple[str, str, bytes | None]:
                     if len(data) > MAX_TORRENT_SIZE:
                         raise ValueError("Torrent metadata is too large")
                 content = bytes(data)
+                if is_nzb(content):
+                    return url, "", content
                 return url, torrent_info_hash(content), content
     raise ValueError("Too many torrent redirects")
