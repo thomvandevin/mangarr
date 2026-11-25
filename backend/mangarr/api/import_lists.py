@@ -66,6 +66,7 @@ async def _out(session: AsyncSession, lst: ImportList) -> ImportListOut:
         monitored=lst.monitored,
         monitor_mode=lst.monitor_mode,
         search_now=lst.search_now,
+        clean_removed=lst.clean_removed,
         last_synced_at=lst.last_synced_at,
         last_error=lst.last_error,
         entry_counts=counts,
@@ -100,6 +101,7 @@ async def _apply(session: AsyncSession, lst: ImportList, body: ImportListIn) -> 
     lst.monitored = body.monitored
     lst.monitor_mode = body.monitor_mode
     lst.search_now = body.search_now
+    lst.clean_removed = body.clean_removed
 
 
 async def _require(session: AsyncSession, list_id: int) -> ImportList:
@@ -187,7 +189,7 @@ async def sync_import_list(list_id: int, session: AsyncSession = Depends(get_ses
         raise HTTPException(400, str(exc)) from None
     return ImportListSyncOut(
         fetched=result.fetched, added=result.added,
-        existing=result.existing, failed=result.failed,
+        existing=result.existing, failed=result.failed, removed=result.removed,
     )
 
 

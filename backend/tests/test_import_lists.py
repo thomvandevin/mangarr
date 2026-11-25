@@ -27,7 +27,7 @@ from mangarr.metadata import anilist as anilist_metadata
 from mangarr.metadata.anilist import API_URL as ANILIST_URL
 from mangarr.metadata.base import SeriesMetadata
 from mangarr.metadata.mangaupdates import API_URL as MU_URL
-from mangarr.models import Base, ImportList, RootFolder, Series
+from mangarr.models import Base, Chapter, ImportList, RootFolder, Series
 from mangarr.schemas import ImportListIn
 
 
@@ -373,3 +373,55 @@ async def test_mangaupdates_bad_login():
     respx.put(f"{MU_URL}/account/login").respond(401, json={"status": "exception"})
     with pytest.raises(ImportListError, match="rejected"):
         await fetch_entries("mangaupdates", {"username": "me", "password": "bad"})
+
+
+async def test_series_leaving_the_list_is_unmonitored_and_deleted(
+    maker, providers, refreshes, monkeypatch, tmp_path
+):
+    one, two = (ListEntry(key=f"anilist:{n}", title=str(n), anilist_id=n) for n in (1, 2))
+    served = _serve(monkeypatch, [one, two])
+    list_id = await _list(maker, clean_removed=True)
+    await _sync(maker, list_id)
+    async with maker() as session:
+        (await session.get(RootFolder, 1)).path = str(tmp_path)
+        gone = (await session.execute(select(Series).where(Series.anilist_id == 1))).scalar_one()
+        gone.folder_name = "One"
+        page = tmp_path / "One" / "One - Ch. 0001.cbz"
+        page.parent.mkdir()
+        page.write_bytes(b"x")
+        (tmp_path / "Two").mkdir()
+        session.add(Chapter(series_id=gone.id, number=1, downloaded=True, file_path=str(page)))
+        await session.commit()
+
+    served["entries"] = []
+    assert (await _sync(maker, list_id)).removed == 0
+    assert page.exists()
+
+    served["entries"] = [two]
+    assert (await _sync(maker, list_id)).removed == 1
+    assert not page.parent.exists() and (tmp_path / "Two").is_dir()
+    async with maker() as session:
+        gone = await import_lists._load_series(session, gone.id)
+        assert gone.monitored is False
+        assert [(c.downloaded, c.file_path, c.monitored) for c in gone.chapters] == [(False, "", False)]
+    assert (await _sync(maker, list_id)).removed == 0
+
+    refreshes.clear()
+    served["entries"] = [one, two]
+    assert (await _sync(maker, list_id)).existing == 1
+    assert refreshes == [([gone.id], False)]
+    async with maker() as session:
+        assert (await session.get(Series, gone.id)).monitored is True
+
+
+async def test_series_leaving_the_list_stays_without_the_option(
+    maker, providers, refreshes, monkeypatch
+):
+    served = _serve(monkeypatch, [ListEntry(key="anilist:1", title="One", anilist_id=1),
+                                  ListEntry(key="anilist:2", title="Two", anilist_id=2)])
+    list_id = await _list(maker)
+    await _sync(maker, list_id)
+    served["entries"].pop()
+    assert (await _sync(maker, list_id)).removed == 0
+    async with maker() as session:
+        assert all(s.monitored for s in (await session.execute(select(Series))).scalars())

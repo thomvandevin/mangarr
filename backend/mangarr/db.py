@@ -86,6 +86,7 @@ _COLUMN_MIGRATIONS: list[tuple[str, str, str, str | None]] = [
     ("series", "deletion_pending", "BOOLEAN NOT NULL DEFAULT 0", None),
     ("library_issues", "public_id", "VARCHAR NOT NULL DEFAULT ''", "ux_library_issues_public_id"),
     ("library_issues", "revision", "VARCHAR NOT NULL DEFAULT ''", None),
+    ("import_lists", "clean_removed", "BOOLEAN NOT NULL DEFAULT 0", None),
 ]
 
 # Chapters mangarr downloaded before file provenance was tracked: the latest

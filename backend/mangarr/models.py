@@ -354,6 +354,7 @@ class ImportList(Base):
     monitored: Mapped[bool] = mapped_column(Boolean, default=True)
     monitor_mode: Mapped[str] = mapped_column(String, default="all")
     search_now: Mapped[bool] = mapped_column(Boolean, default=False)
+    clean_removed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str] = mapped_column(Text, default="")
 

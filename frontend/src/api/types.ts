@@ -460,6 +460,7 @@ export interface ImportListConfig {
   monitored: boolean;
   monitor_mode: MonitorMode;
   search_now: boolean;
+  clean_removed: boolean;
 }
 
 export interface ImportList extends ImportListConfig {
@@ -495,4 +496,5 @@ export interface ImportListSyncResult {
   added: number;
   existing: number;
   failed: number;
+  removed: number;
 }

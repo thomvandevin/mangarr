@@ -782,6 +782,7 @@ class ImportListIn(BaseModel):
     monitored: bool = True
     monitor_mode: MonitorMode = "all"
     search_now: bool = False
+    clean_removed: bool = False
 
 
 class ImportListOut(ImportListIn):
@@ -820,3 +821,4 @@ class ImportListSyncOut(BaseModel):
     added: int
     existing: int
     failed: int
+    removed: int = 0
