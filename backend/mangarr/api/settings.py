@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import kavita, notifications, settings_service
 from ..db import get_session
+from ..download import transmission
 from ..download.qbittorrent import QbtError, test_connection
 from ..schemas import (
     KavitaLibraryOut,
@@ -116,7 +117,8 @@ async def qbt_test(body: QbtTestIn, session: AsyncSession = Depends(get_session)
             "qbittorrent_url": body.url, "qbittorrent_username": body.username,
         })
     try:
-        version = await test_connection(body.url, body.username, password)
+        test = transmission.test_connection if body.client == "transmission" else test_connection
+        version = await test(body.url, body.username, password)
     except QbtError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "version": version}

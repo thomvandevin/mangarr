@@ -444,6 +444,7 @@ class QbtTestIn(BaseModel):
     url: str
     username: str
     password: str
+    client: Literal["qbittorrent", "transmission"] = "qbittorrent"
 
 
 class WebhookTestIn(BaseModel):

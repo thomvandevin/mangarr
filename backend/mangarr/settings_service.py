@@ -42,7 +42,9 @@ DEFAULTS: dict[str, str] = {
     "torznab_indexers": "[]",
     "torrent_query_templates": "{series}",
     "torrent_monitor_enabled": "false",
-    # qBittorrent
+    # The torrent download client. The qbittorrent_* keys hold the
+    # connection of whichever client torrent_client names.
+    "torrent_client": "qbittorrent",
     "qbittorrent_url": "http://localhost:8080",
     "qbittorrent_username": "admin",
     "qbittorrent_password": "",
@@ -188,6 +190,9 @@ def validate(values: dict[str, str]) -> None:
             raise ValueError(
                 "finished_series_mode must be one of " + ", ".join(FINISHED_SERIES_MODES)
             )
+
+    if values.get("torrent_client", "qbittorrent") not in {"qbittorrent", "transmission"}:
+        raise ValueError("torrent_client must be qbittorrent or transmission")
 
     if "preferred_title_language" in values:
         if values["preferred_title_language"] not in {"provider", "english", "romaji", "native"}:

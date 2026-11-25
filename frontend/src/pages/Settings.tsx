@@ -262,6 +262,8 @@ export function TorznabSettings({ form, setForm }: { form: SettingsType; setForm
   </div>;
 }
 
+const TORRENT_CLIENTS: Record<string, string> = { qbittorrent: "qBittorrent", transmission: "Transmission" };
+
 const SOURCE_HINTS: Record<string, string> = {
   mangaplus: "Official same-day Shonen Jump. Needs a residential IP — bans datacenters.",
   webtoons: "Official WEBTOON Originals. Only episodes that are currently free (no coins) are listed.",
@@ -769,8 +771,9 @@ export default function Settings() {
         url: form.qbittorrent_url,
         username: form.qbittorrent_username,
         password: form.qbittorrent_password,
+        client: form.torrent_client,
       }),
-    onSuccess: (d) => setQbtTest(`✔ Connected — qBittorrent ${d.version}`),
+    onSuccess: (d) => setQbtTest(`✔ Connected: ${TORRENT_CLIENTS[form.torrent_client]} ${d.version}`),
     onError: (e) => setQbtTest(`✖ ${(e as Error).message}`),
   });
 
@@ -975,14 +978,24 @@ export default function Settings() {
         <TorznabSettings form={form} setForm={setForm} />
 
         <div className="settings-section">
-          <h3>Download Client — qBittorrent</h3>
+          <h3>Torrent download client</h3>
           <p className="section-hint">
-            Torrent grabs (Nyaa and Torznab releases) are sent to qBittorrent and imported when complete.
+            Torrent grabs (Nyaa and Torznab releases) are sent to this client and imported when complete.
             Re-enter the password after changing the URL or username, before testing or saving.
           </p>
           <div className="form-row">
             <label>Enabled</label>
-            <Toggle label="Enable qBittorrent" on={form.qbittorrent_enabled === "true"} onChange={setBool("qbittorrent_enabled")} />
+            <Toggle label="Enable the torrent client" on={form.qbittorrent_enabled === "true"} onChange={setBool("qbittorrent_enabled")} />
+          </div>
+          <div className="form-row">
+            <label>Client</label>
+            <select value={form.torrent_client} onChange={set("torrent_client")}>
+              {Object.entries(TORRENT_CLIENTS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="form-row">
             <label>URL</label>
@@ -1008,8 +1021,8 @@ export default function Settings() {
             </button>
           </div>
           <p className="section-hint">
-            Base folder shared by mangarr and qBittorrent; the category is added automatically.
-            Leave empty to use qBittorrent&apos;s default. Put it on the same filesystem/share as
+            Base folder shared by mangarr and the torrent client; the category is added automatically.
+            Leave empty to use the client&apos;s default. Put it on the same filesystem/share as
             the library so imports can hardlink instead of copy.
           </p>
           <div className="form-row">
