@@ -4,7 +4,7 @@ import zipfile
 
 from PIL import Image
 
-from mangarr.library.ereader import BookInfo, decode, mirror, plain_text, screen_pages
+from mangarr.library.ereader import BookInfo, Contents, decode, mirror, plain_text, screen_pages
 
 
 def _cbz(path, pages, comicinfo="<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>"):
@@ -95,25 +95,39 @@ def test_copies_carry_series_metadata_and_follow_its_changes(tmp_path):
         assert "<dc:description>A witch story &amp; more</dc:description>" in epub.read("content.opf").decode()
 
 
-def test_a_cover_opens_the_copy_and_a_new_cover_rebuilds_it(tmp_path):
+def test_covers_label_volumes_and_front_loose_chapters(tmp_path):
     root, target = tmp_path / "manga", tmp_path / "kobo"
     folder = root / "A"
-    src = folder / "A - Vol. 01.cbz"
-    _cbz(src, [((900, 1300), "red")], comicinfo="<ComicInfo/>")
-    mirror([(root, folder)], target, 1072, 1448, 75)
-    copy = target / "A" / "A - Vol. 01.epub"
-    with zipfile.ZipFile(copy) as epub:
-        assert "p0002.jpg" not in epub.namelist()
+    released, merged, loose = (folder / f"A - {n}.cbz" for n in ("Vol. 01", "Vol. 02", "Ch. 0011"))
+    for src in (released, merged, loose):
+        _cbz(src, [((900, 1300), "red"), ((900, 1300), "green")], comicinfo="<ComicInfo/>")
+    art = tmp_path / "002.jpg"
+    Image.new("RGB", (700, 1000), "blue").save(art, "JPEG")
+    info = {folder: BookInfo("A", art=art)}
+    contents = {merged: Contents(((6, "Six"), (7, "")), merged=True, art=art), loose: Contents(((11, "The End"),))}
+    mirror([(root, folder)], target, 1072, 1448, 75, info, contents)
 
-    cover = tmp_path / "001.jpg"
-    Image.new("RGB", (700, 1000), "blue").save(cover, "JPEG")
-    later = copy.stat().st_mtime_ns + 10**9
-    os.utime(cover, ns=(later, later))
-    mirror([(root, folder)], target, 1072, 1448, 75, covers={src: cover})
-    with zipfile.ZipFile(copy) as epub:
-        assert Image.open(io.BytesIO(epub.read("p0001.jpg"))).getpixel((10, 10))[2] > 200
-        assert "p0002.jpg" in epub.namelist()
-        assert 'href="p0001.jpg" media-type="image/jpeg" properties="cover-image"' in epub.read("content.opf").decode()
+    def copy(name):
+        with zipfile.ZipFile(target / "A" / f"A - {name}.epub") as epub:
+            pages = sorted(n for n in epub.namelist() if n.endswith(".jpg"))
+            first = Image.open(io.BytesIO(epub.read(pages[0]))).convert("RGB")
+            return len(pages), first.getpixel((10, 10)), first.getpixel((10, 1440)), epub.read("content.opf").decode()
+
+    count, top, bottom, _ = copy("Vol. 01")
+    assert count == 2 and top[0] > 200 and sum(bottom) < 60  # its own cover, labelled
+    count, top, bottom, opf = copy("Vol. 02")
+    assert count == 3 and top[2] > 200 and sum(bottom) < 60
+    assert "Chapters 6-7\n6. Six" in opf
+    count, top, bottom, opf = copy("Ch. 0011")
+    assert count == 3 and top[2] > 200 and min(bottom) > 200
+    assert "<dc:description>Chapter 11: The End</dc:description>" in opf
+
+    made = (target / "A" / "A - Vol. 02.epub").stat().st_mtime_ns
+    mirror([(root, folder)], target, 1072, 1448, 75, info, contents)
+    assert (target / "A" / "A - Vol. 02.epub").stat().st_mtime_ns == made
+    os.utime(art, ns=(made + 10**9, made + 10**9))
+    mirror([(root, folder)], target, 1072, 1448, 75, info, contents)
+    assert (target / "A" / "A - Vol. 02.epub").stat().st_mtime_ns != made
 
 
 def test_truncated_page_is_still_decoded():

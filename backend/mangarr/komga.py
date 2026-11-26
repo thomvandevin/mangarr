@@ -48,11 +48,12 @@ def volume_progress(chapter_books: list[dict | None]) -> int | str | None:
     """Where a reader is in a volume made of these chapter books (in reading
     order): the last page read, "completed" when every chapter was finished,
     or None when none was started. A chapter Komga doesn't know counts as
-    unread."""
+    unread. Each chapter copy opens with a generated cover the volume
+    doesn't repeat."""
     page = 0
     for book in chapter_books:
         progress = (book or {}).get("readProgress") or {}
         if not progress.get("completed"):
-            return page + (progress.get("page") or 0) or None
-        page += ((book or {}).get("media") or {}).get("pagesCount") or 0
+            return page + max((progress.get("page") or 0) - 1, 0) or None
+        page += max((((book or {}).get("media") or {}).get("pagesCount") or 0) - 1, 0)
     return "completed" if chapter_books else None
