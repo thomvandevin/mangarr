@@ -72,14 +72,15 @@ class Contents:
     art: Path | None = None
 
 
-# bump to rebuild every copy's cover
-COVER_STYLE = 1
+# bump to rebuild the covers of that style
+BAND_STYLE = 2
+CARD_STYLE = 1
 
 
 @dataclass(frozen=True)
 class Cover:
     """The generated first page of a copy. `band` puts a label naming the
-    series and volume under the art, which without `art` is the archive's own
+    volume and series under the art, which without `art` is the archive's own
     first page (a downloaded volume opens with its cover). Otherwise a card
     shows the art above the heading, number and title."""
 
@@ -109,7 +110,7 @@ def cover_for(src: Path, book: BookInfo, contents: Contents) -> Cover | None:
 
 def cover_signature(cover: Cover | None) -> str:
     return '<meta name="mangarr:cover" content="%s"/>' % hashlib.sha1(
-        f"{COVER_STYLE}{cover!r}".encode()
+        f"{BAND_STYLE if cover and cover.band else CARD_STYLE}{cover!r}".encode()
     ).hexdigest()[:16]
 
 
@@ -149,10 +150,11 @@ def cover_page(cover: Cover, art: bytes | None, width: int, height: int) -> byte
         middle = height - band // 2
         draw.rectangle((0, height - band, width, height), fill="black")
         label, font = f"Vol. {cover.number}", _font(band * 3 // 5)
-        draw.text((width - margin, middle), label, font=font, fill="white", anchor="rm",
+        draw.text((margin, middle), label, font=font, fill="white", anchor="lm",
                   stroke_width=bold, stroke_fill="white")
-        room = width - 3 * margin - draw.textlength(label, font=font)
-        draw.text((margin, middle), cover.series, font=_fitted(draw, cover.series, band * 2 // 5, room),
+        # the number leads: the Kobo draws its download icon over the bottom right
+        start = 2 * margin + draw.textlength(label, font=font)
+        draw.text((start, middle), cover.series, font=_fitted(draw, cover.series, band * 2 // 5, width - margin - start),
                   fill="white", anchor="lm")
     else:
         art_height = height * 9 // 20
