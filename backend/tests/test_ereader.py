@@ -117,10 +117,10 @@ def test_covers_label_volumes_and_front_loose_chapters(tmp_path):
     assert count == 2 and top[0] > 200 and sum(bottom) < 60  # its own cover, labelled
     count, top, bottom, opf = copy("Vol. 02")
     assert count == 3 and top[2] > 200 and sum(bottom) < 60
-    assert "Chapters 6-7\n6. Six" in opf
+    assert "<dc:description>Chapters 6-7: 6. Six.</dc:description>" in opf
     count, top, bottom, opf = copy("Ch. 0011")
     assert count == 3 and top[2] > 200 and min(bottom) > 200
-    assert "<dc:description>Chapter 11: The End</dc:description>" in opf
+    assert "<dc:description>Chapter 11: The End.</dc:description>" in opf
 
     made = (target / "A" / "A - Vol. 02.epub").stat().st_mtime_ns
     mirror([(root, folder)], target, 1072, 1448, 75, info, contents)
