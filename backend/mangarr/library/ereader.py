@@ -182,14 +182,16 @@ def cover_page(cover: Cover, art: bytes | None, width: int, height: int) -> byte
 
 
 def contents_text(chapters: tuple[tuple[float, str], ...]) -> str:
-    if len(chapters) == 1:
-        number, title = chapters[0]
-        return f"Chapter {number:g}" + (f": {title}" if title else "")
+    """One line, as Komga collapses whitespace in descriptions."""
     if not chapters:
         return ""
-    lines = [f"Chapters {chapters[0][0]:g}-{chapters[-1][0]:g}"]
-    lines += [f"{number:g}. {title}" for number, title in chapters if title]
-    return "\n".join(lines)
+    if len(chapters) == 1:
+        number, title = chapters[0]
+        text = f"Chapter {number:g}" + (f": {title}" if title else "")
+    else:
+        titles = " · ".join(f"{number:g}. {title}" for number, title in chapters if title)
+        text = f"Chapters {chapters[0][0]:g}-{chapters[-1][0]:g}" + (f": {titles}" if titles else "")
+    return text if text[-1] in ".!?" else text + "."
 
 
 def plain_text(html: str) -> str:
