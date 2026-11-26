@@ -16,8 +16,10 @@ def book(pages, page=None, completed=False):
 
 def test_volume_progress_follows_the_chapters_in_order():
     assert volume_progress([book(20), book(18)]) is None
-    assert volume_progress([book(20, completed=True), book(18, page=5), book(22)]) == 25
-    assert volume_progress([book(20, completed=True), None]) == 20
+    assert volume_progress([book(20, completed=True), book(18, page=5), book(22)]) == 23
+    assert volume_progress([book(20, completed=True), book(18, page=1)]) == 19
+    assert volume_progress([book(20, completed=True), None]) == 19
+    assert volume_progress([book(20, page=1)]) is None
     assert volume_progress([book(20, completed=True), book(18, completed=True)]) == "completed"
 
 
@@ -65,7 +67,7 @@ async def test_waiting_progress_lands_once_komga_lists_the_volume(monkeypatch, t
     komga = FakeKomga()
     vol5 = tmp_path / "A - Vol. 05.cbz"
     by_volume = {5: vol5, 6: tmp_path / "A - Vol. 06.cbz"}
-    await ereader.update_komga(komga, "lib", True, [(1, "A", waiting, by_volume)], {vol5: tmp_path / "005.jpg"})
+    await ereader.update_komga(komga, "lib", True, [(1, "A", waiting, by_volume)])
     assert komga.scans == 1 and komga.progress == [("b5", 26)]
     async with maker() as session:
         assert json.loads((await session.get(Series, 1)).pending_progress) == {"6": "completed"}
