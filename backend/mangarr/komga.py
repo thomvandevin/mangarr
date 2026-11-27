@@ -31,6 +31,13 @@ class Komga:
                 return {book["name"]: book for book in books.json().get("content") or []}
         return {}
 
+    async def library_books(self, library_id: str) -> list[dict]:
+        found = await self._call("GET", "/books", params={"library_id": library_id, "unpaged": "true"})
+        return found.json().get("content") or []
+
+    async def refresh_metadata(self, book_id: str) -> None:
+        await self._call("POST", f"/books/{book_id}/metadata/refresh")
+
     async def set_progress(self, book_id: str, page: int | None) -> None:
         """Mark a book read up to `page`, or finished when `page` is None."""
         body = {"completed": True} if page is None else {"page": page}
