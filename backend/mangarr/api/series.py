@@ -640,6 +640,8 @@ async def _apply_series_edit(
         series.merge_volumes = body.merge_volumes
     if body.ereader_copy is not None:
         series.ereader_copy = body.ereader_copy
+    if body.ereader_bundle is not None:
+        series.ereader_bundle = body.ereader_bundle
     if body.root_folder_id is not None:
         series.root_folder_id = body.root_folder_id
     if body.folder_name is not None:

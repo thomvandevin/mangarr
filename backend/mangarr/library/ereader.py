@@ -7,10 +7,12 @@ import hashlib
 import io
 import json
 import logging
+import math
 import re
 import time
 import uuid
 import zipfile
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import partial
@@ -104,7 +106,10 @@ def cover_for(src: Path, book: BookInfo, contents: Contents) -> Cover | None:
         if contents.art or not contents.merged:
             return Cover(book.series, "Volume", number, art=contents.art, band=True)
         return Cover(book.series, "Volume", number, art=book.art)
-    title = contents.chapters[0][1] if len(contents.chapters) == 1 else ""
+    if len(contents.chapters) > 1:
+        first, last = contents.chapters[0][0], contents.chapters[-1][0]
+        return Cover(book.series, "Chapters", f"{first:g}-{last:g}", art=book.art)
+    title = contents.chapters[0][1] if contents.chapters else ""
     return Cover(book.series, "Chapter", number, title, book.art)
 
 
@@ -207,8 +212,24 @@ def series_position(src: Path) -> str:
     return f"{float(match.group(1)):g}" if match else ""
 
 
-def metadata_xml(src: Path, info: BookInfo, cover: Cover | None = None) -> str:
-    modified = datetime.fromtimestamp(src.stat().st_mtime, timezone.utc)
+def chapter_bundles(held: dict[Path, list[tuple[float, str]]], size: int) -> dict[Path, tuple[Path, ...]]:
+    """Loose chapter files grouped as chapters 1-10, 11-20, ... for `size`
+    10, keyed by the bundle's own name. A range is bundled once its last
+    chapter is out; until then its chapters stay single copies."""
+    files = sorted((chapters[0][0], path) for path, chapters in held.items() if chapters and " - Ch. " in path.stem)
+    groups: dict[int, list[Path]] = {}
+    for number, path in files:
+        groups.setdefault(max(math.floor((number - 1) / size), 0), []).append(path)
+    newest = files[-1][0] if files else 0
+    return {
+        paths[0].with_name(f"{paths[0].stem}-{paths[-1].stem.rsplit(' - Ch. ', 1)[1]}{paths[0].suffix}"): tuple(paths)
+        for group, paths in groups.items()
+        if len(paths) > 1 and newest >= (group + 1) * size
+    }
+
+
+def metadata_xml(src: Path, info: BookInfo, cover: Cover | None = None, parts: tuple[Path, ...] = ()) -> str:
+    modified = datetime.fromtimestamp(max(part.stat().st_mtime for part in parts or (src,)), timezone.utc)
     position = series_position(src)
     series = (
         f'<meta property="belongs-to-collection" id="series">{escape(info.series)}</meta>'
@@ -230,13 +251,15 @@ def metadata_xml(src: Path, info: BookInfo, cover: Cover | None = None) -> str:
     )
 
 
-def refresh_metadata(src: Path, dest: Path, info: BookInfo, cover: Cover | None = None) -> bool:
+def refresh_metadata(
+    src: Path, dest: Path, info: BookInfo, cover: Cover | None = None, parts: tuple[Path, ...] = (),
+) -> bool:
     """Swap the metadata of an existing copy without re-encoding its pages.
     Returns whether the copy changed."""
     with zipfile.ZipFile(dest) as epub:
         opf = epub.read("content.opf").decode()
         updated = re.sub(
-            r"<metadata .*?</metadata>", lambda _: metadata_xml(src, info, cover), opf, count=1, flags=re.S
+            r"<metadata .*?</metadata>", lambda _: metadata_xml(src, info, cover, parts), opf, count=1, flags=re.S
         )
         if updated == opf:
             return False
@@ -291,23 +314,31 @@ def screen_pages(image: Image.Image, width: int, height: int, rtl: bool) -> list
 
 def write_epub(
     src: Path, dest: Path, width: int, height: int, quality: int, info: BookInfo = BookInfo(),
-    cover: Cover | None = None,
+    cover: Cover | None = None, parts: tuple[Path, ...] = (),
 ) -> None:
+    """`parts` are the archives a bundle is made of, in reading order; by
+    default the copy holds `src` alone."""
     title = escape(src.stem)
     tmp = dest.with_suffix(".epub.partial")
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with zipfile.ZipFile(src) as cbz, zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as epub:
-            files = list(archive_files(cbz.infolist()))
+        with ExitStack() as stack:
+            archives = [stack.enter_context(zipfile.ZipFile(part)) for part in parts or (src,)]
+            epub = stack.enter_context(zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED))
+            members = [(cbz, list(archive_files(cbz.infolist()))) for cbz in archives]
             rtl = any(
                 path.name.casefold() == "comicinfo.xml" and b"RightToLeft" in cbz.read(entry)
-                for entry, path in files
+                for cbz, files in members for entry, path in files
             )
             epub.writestr("mimetype", "application/epub+zip")
             epub.writestr("META-INF/container.xml", CONTAINER)
             epub.writestr("nav.xhtml", NAV.format(title=title))
             count = 0
-            reads = [partial(cbz.read, entry) for entry, _ in sorted(archive_pages(files), key=lambda f: f[1].as_posix())]
+            reads = [
+                partial(cbz.read, entry)
+                for cbz, files in members
+                for entry, _ in sorted(archive_pages(files), key=lambda f: f[1].as_posix())
+            ]
             if cover:
                 art = reads.pop(0) if cover.own_page else cover.art.read_bytes if cover.art else None
                 reads.insert(0, lambda: cover_page(cover, art() if art else None, width, height))
@@ -326,7 +357,7 @@ def write_epub(
                 '<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" '
                 'version="3.0" unique-identifier="id" '
                 'prefix="rendition: http://www.idpf.org/vocab/rendition/#">'
-                + metadata_xml(src, info, cover)
+                + metadata_xml(src, info, cover, parts)
                 + '<manifest><item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>'
                 + "".join(
                     f'<item id="i{n:04d}" href="p{n:04d}.jpg" media-type="image/jpeg"'
@@ -346,12 +377,15 @@ def write_epub(
 def mirror(
     folders: list[tuple[Path, Path]], target: Path, width: int, height: int, quality: int,
     info: dict[Path, BookInfo] | None = None, contents: dict[Path, Contents] | None = None,
+    bundles: dict[Path, tuple[Path, ...]] | None = None,
 ) -> bool:
     """Make `target` hold exactly one EPUB per CBZ in the (root, series
     folder) pairs, laid out as under the root, carrying the metadata `info`
     holds for each series folder and what `contents` knows of each archive.
+    The archives of each of `bundles` share one EPUB named after it.
     Returns whether any copy changed."""
-    info, contents = info or {}, contents or {}
+    info, contents, bundles = info or {}, contents or {}, bundles or {}
+    bundle_of = {part: name for name, parts in bundles.items() for part in parts}
     wanted: dict[Path, tuple[Path, BookInfo]] = {}
     changed = False
     # copies inside the library would be picked up as library files, and
@@ -366,7 +400,8 @@ def mirror(
             return changed
         for src in folder.rglob("*"):
             if src.suffix.lower() in {".cbz", ".zip"}:
-                wanted[target / src.relative_to(root).with_suffix(".epub")] = (src, info.get(folder, BookInfo()))
+                name = bundle_of.get(src, src)
+                wanted[target / name.relative_to(root).with_suffix(".epub")] = (name, info.get(folder, BookInfo()))
     if target.is_dir():
         for stale in [p for p in target.rglob("*.epub") if p not in wanted]:
             stale.unlink()
@@ -379,16 +414,18 @@ def mirror(
         book = replace(book, description="\n\n".join(filter(None, (contents_text(held.chapters), book.description))))
         cover = cover_for(src, book, held)
         art = cover.art if cover else None
+        parts = bundles.get(src, (src,))
         try:
+            newest = max(part.stat().st_mtime for part in parts)
             if (
                 not dest.exists()
-                or dest.stat().st_mtime < max(src.stat().st_mtime, art.stat().st_mtime if art else 0)
+                or dest.stat().st_mtime < max(newest, art.stat().st_mtime if art else 0)
                 or not _has_cover(dest, cover)
             ):
-                write_epub(src, dest, width, height, quality, book, cover)
+                write_epub(src, dest, width, height, quality, book, cover, parts)
                 changed = True
             else:
-                changed = refresh_metadata(src, dest, book, cover) or changed
+                changed = refresh_metadata(src, dest, book, cover, parts) or changed
         except Exception as exc:
             log.warning("e-reader copy of %s failed: %s", src, exc)
     return changed
@@ -426,7 +463,7 @@ async def volume_covers(series_id: int, mangadex_id: str, volumes: set[int]) -> 
 async def sync_ereader_copies() -> None:
     async with session_scope() as session:
         values = await settings_service.get_all(session)
-        folders, info, found, pending = [], {}, [], []
+        folders, info, found, pending, bundles = [], {}, [], [], {}
         for series, root in await session.execute(
             select(Series, RootFolder.path)
             .join(RootFolder, RootFolder.id == Series.root_folder_id)
@@ -453,6 +490,10 @@ async def sync_ereader_copies() -> None:
                 if source == MERGED_FILE_SOURCE:
                     merged.add(Path(path))
                 highest = max(highest, volume or 0)
+            if series.ereader_bundle:
+                for name, parts in chapter_bundles(held, series.ereader_bundle).items():
+                    bundles[name] = parts
+                    held[name] = [chapter for part in parts for chapter in held[part]]
             link = (await session.execute(
                 select(SeriesSourceLink.external_id)
                 .where(SeriesSourceLink.series_id == series.id, SeriesSourceLink.source_name == mangadex.name)
@@ -476,7 +517,7 @@ async def sync_ereader_copies() -> None:
     changed = await asyncio.to_thread(
         mirror, folders, Path(values["ereader_dir"]),
         int(values["ereader_width"]), int(values["ereader_height"]), int(values["ereader_quality"]),
-        info, contents,
+        info, contents, bundles,
     )
     if komga := komga_from_settings(values):
         await update_komga(*komga, changed, pending)

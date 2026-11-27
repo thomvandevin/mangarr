@@ -88,6 +88,7 @@ _COLUMN_MIGRATIONS: list[tuple[str, str, str, str | None]] = [
     ("library_issues", "revision", "VARCHAR NOT NULL DEFAULT ''", None),
     ("import_lists", "clean_removed", "BOOLEAN NOT NULL DEFAULT 0", None),
     ("series", "ereader_copy", "BOOLEAN NOT NULL DEFAULT 1", None),
+    ("series", "ereader_bundle", "INTEGER NOT NULL DEFAULT 0", None),
     ("series", "authors", "TEXT NOT NULL DEFAULT ''", None),
     ("series", "merge_holds", "TEXT NOT NULL DEFAULT ''", None),
     ("series", "pending_progress", "TEXT NOT NULL DEFAULT ''", None),

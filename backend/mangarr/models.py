@@ -114,6 +114,8 @@ class Series(Base):
     # chapter copies in Komga, set on the volume once Komga lists it
     pending_progress: Mapped[str] = mapped_column(Text, default="", server_default="")
     ereader_copy: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    # chapters per e-reader copy, for series without volumes (webtoons); 0 keeps one copy per file
+    ereader_bundle: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # last scheduled monitor pass; finished, complete series are checked less
     last_monitored_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
