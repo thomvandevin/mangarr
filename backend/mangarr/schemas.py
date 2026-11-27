@@ -115,6 +115,7 @@ class SeriesDetailOut(SeriesOut):
     merge_volumes: bool = False
     merge_holds: str = ""
     ereader_copy: bool = True
+    ereader_bundle: int = 0
     # enabled download sources in global priority order, and in the order
     # grabs try them for this series (override applied, blocked removed)
     global_source_order: list[str] = []
@@ -196,6 +197,7 @@ class SeriesUpdateIn(BaseModel):
     upgrade_cutoff: str | None = None
     merge_volumes: bool | None = None
     ereader_copy: bool | None = None
+    ereader_bundle: int | None = Field(None, ge=0)
 
 
 class SeriesEditorIn(BaseModel):

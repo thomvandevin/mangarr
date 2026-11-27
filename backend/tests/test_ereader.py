@@ -4,7 +4,7 @@ import zipfile
 
 from PIL import Image
 
-from mangarr.library.ereader import BookInfo, Contents, decode, mirror, plain_text, screen_pages
+from mangarr.library.ereader import BookInfo, Contents, chapter_bundles, decode, mirror, plain_text, screen_pages
 
 
 def _cbz(path, pages, comicinfo="<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>"):
@@ -128,6 +128,36 @@ def test_covers_label_volumes_and_front_loose_chapters(tmp_path):
     os.utime(art, ns=(made + 10**9, made + 10**9))
     mirror([(root, folder)], target, 1072, 1448, 75, info, contents)
     assert (target / "A" / "A - Vol. 02.epub").stat().st_mtime_ns != made
+
+
+def test_loose_chapters_are_bundled_once_their_range_is_out(tmp_path):
+    root, target = tmp_path / "manga", tmp_path / "kobo"
+    folder = root / "W"
+    colours = {"0001": "red", "0002": "green", "0002.5": "blue", "0003": "red", "0004": "red", "0005": "red"}
+    held = {}
+    for label, colour in colours.items():
+        _cbz(folder / f"W - Ch. {label}.cbz", [((700, 1280), colour)], comicinfo="<ComicInfo/>")
+        held[folder / f"W - Ch. {label}.cbz"] = [(float(label), f"Part {label}")]
+
+    def run():
+        bundles = chapter_bundles(held, 2)
+        for name, parts in bundles.items():
+            held[name] = [chapter for part in parts for chapter in held[part]]
+        contents = {path: Contents(tuple(chapters)) for path, chapters in held.items()}
+        mirror([(root, folder)], target, 1072, 1448, 75, {folder: BookInfo("W")}, contents, bundles)
+        return sorted(p.name for p in (target / "W").iterdir())
+
+    assert run() == ["W - Ch. 0001-0002.5.epub", "W - Ch. 0003-0004.epub", "W - Ch. 0005.epub"]
+    with zipfile.ZipFile(target / "W" / "W - Ch. 0001-0002.5.epub") as epub:
+        pages = [Image.open(io.BytesIO(epub.read(f"p{n:04d}.jpg"))).convert("RGB").getpixel((10, 10)) for n in (2, 3, 4)]
+        opf = epub.read("content.opf").decode()
+        assert "p0005.jpg" not in epub.namelist()
+    assert [max(range(3), key=pixel.__getitem__) for pixel in pages] == [0, 1, 2]  # red, green, blue
+    assert 'property="group-position">1</meta>' in opf and "<dc:description>Chapters 1-2.5: 1. Part 0001" in opf
+
+    _cbz(folder / "W - Ch. 0006.cbz", [((700, 1280), "red")], comicinfo="<ComicInfo/>")
+    held[folder / "W - Ch. 0006.cbz"] = [(6.0, "")]
+    assert run()[-1] == "W - Ch. 0005-0006.epub"
 
 
 def test_truncated_page_is_still_decoded():
