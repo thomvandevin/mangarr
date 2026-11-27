@@ -527,8 +527,9 @@ async def update_komga(
     komga: Komga, library_id: str, changed: bool,
     pending: list[tuple[int, str, dict[str, int | str], dict[int, Path]]],
 ) -> None:
-    """Scan Komga's library when copies changed, then give each merged volume
-    Komga now lists the progress read from its chapters."""
+    """Scan Komga's library when copies changed, give each merged volume
+    Komga now lists the progress read from its chapters, and correct book
+    numbers Komga did not take from the copies."""
     if changed:
         try:
             await komga.scan(library_id)
@@ -555,3 +556,16 @@ async def update_komga(
                 left = {k: v for k, v in json.loads(series.pending_progress or "{}").items() if k not in done}
                 series.pending_progress = json.dumps(left) if left else ""
                 await session.commit()
+    try:
+        for book in await komga.library_books(library_id):
+            metadata = book.get("metadata") or {}
+            # Komga sometimes keeps numbering a new or rebuilt book by its position
+            # among the names, although the copy's group-position says otherwise
+            number = series_position(Path(f"{book.get('name')}.epub"))
+            if (
+                number and (book.get("media") or {}).get("status") == "READY"
+                and not metadata.get("numberSortLock") and metadata.get("numberSort") != float(number)
+            ):
+                await komga.refresh_metadata(book["id"])
+    except Exception as exc:
+        log.warning("Komga book numbers failed: %s", exc)
